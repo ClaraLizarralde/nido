@@ -1,10 +1,11 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Plus, X, Loader2, Trash2, Edit3, Check } from 'lucide-react'
+import { Plus, X, Loader2, Trash2, Edit3, Check, Eye, Edit } from 'lucide-react'
 import type { Note, Space } from '@/lib/types'
 import { createClient } from '@/lib/supabase'
 import { formatRelativeTime } from '@/lib/utils'
+import ReactMarkdown from 'react-markdown'
 
 interface NotesTabProps {
   spaceId: string | null
@@ -25,9 +26,7 @@ export default function NotesTab({ spaceId, allSpaces }: NotesTabProps) {
   async function loadNotes() {
     setLoading(true)
     let query = supabase.from('notes').select('*').order('updated_at', { ascending: false })
-    if (spaceId) {
-      query = query.eq('space_id', spaceId)
-    }
+    if (spaceId) query = query.eq('space_id', spaceId)
     const { data } = await query
     setNotes(data || [])
     setLoading(false)
@@ -60,8 +59,7 @@ export default function NotesTab({ spaceId, allSpaces }: NotesTabProps) {
         {spaceId && (
           <button onClick={() => setShowAdd(true)}
             className="ml-auto flex items-center gap-1.5 text-xs px-3 py-1.5 bg-accent text-white rounded-lg hover:opacity-90 font-medium">
-            <Plus size={13} />
-            nueva nota
+            <Plus size={13} /> nueva nota
           </button>
         )}
       </div>
@@ -121,8 +119,29 @@ function NoteCard({ note, spaceName, onEdit, onDelete }: {
       {spaceName && (
         <span className="text-[10px] px-1.5 py-0.5 bg-bg-elevated text-text-muted rounded mb-2 inline-block">{spaceName}</span>
       )}
-      <h4 className="font-medium text-sm text-text-primary mb-2 leading-snug">{note.title}</h4>
-      <p className="text-xs text-text-secondary leading-relaxed whitespace-pre-wrap">{note.content}</p>
+      <h4 className="font-medium text-sm text-text-primary mb-3 leading-snug">{note.title}</h4>
+
+      <div className="prose-nido text-xs text-text-secondary leading-relaxed">
+        <ReactMarkdown
+          components={{
+            h1: ({ children }) => <h1 className="text-sm font-semibold text-text-primary mt-3 mb-1">{children}</h1>,
+            h2: ({ children }) => <h2 className="text-xs font-semibold text-text-primary mt-2 mb-1">{children}</h2>,
+            h3: ({ children }) => <h3 className="text-xs font-medium text-text-primary mt-2 mb-1">{children}</h3>,
+            p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+            strong: ({ children }) => <strong className="font-semibold text-text-primary">{children}</strong>,
+            em: ({ children }) => <em className="italic">{children}</em>,
+            ul: ({ children }) => <ul className="list-disc list-inside space-y-0.5 mb-2">{children}</ul>,
+            ol: ({ children }) => <ol className="list-decimal list-inside space-y-0.5 mb-2">{children}</ol>,
+            li: ({ children }) => <li className="text-text-secondary">{children}</li>,
+            code: ({ children }) => <code className="bg-bg-elevated px-1 py-0.5 rounded text-[11px] font-mono text-accent">{children}</code>,
+            blockquote: ({ children }) => <blockquote className="border-l-2 border-amber-note-border pl-3 text-text-muted italic my-2">{children}</blockquote>,
+            hr: () => <hr className="border-border-subtle my-3" />,
+            a: ({ href, children }) => <a href={href} target="_blank" rel="noopener noreferrer" className="text-accent underline underline-offset-2">{children}</a>,
+          }}
+        >
+          {note.content}
+        </ReactMarkdown>
+      </div>
 
       {note.tags?.length > 0 && (
         <div className="flex gap-1.5 flex-wrap mt-3">
@@ -155,24 +174,70 @@ function NoteForm({ initialTitle = '', initialContent = '', onSave, onCancel }: 
   const [title, setTitle] = useState(initialTitle)
   const [content, setContent] = useState(initialContent)
   const [tags, setTags] = useState('')
+  const [preview, setPreview] = useState(false)
 
   return (
     <div className="bg-amber-note-bg border border-amber-note-border rounded-xl p-4 animate-fade-in"
       style={{ borderLeft: '3px solid rgba(245,166,35,0.5)' }}>
+
       <input
         autoFocus
         value={title}
         onChange={e => setTitle(e.target.value)}
         placeholder="título de la nota..."
-        className="w-full bg-transparent text-sm font-medium text-text-primary placeholder:text-text-muted outline-none mb-2"
+        className="w-full bg-transparent text-sm font-medium text-text-primary placeholder:text-text-muted outline-none mb-3"
       />
-      <textarea
-        value={content}
-        onChange={e => setContent(e.target.value)}
-        placeholder="escribí lo que quieras..."
-        rows={4}
-        className="w-full bg-transparent text-xs text-text-secondary placeholder:text-text-muted outline-none leading-relaxed"
-      />
+
+      {/* toggle editar / preview */}
+      <div className="flex gap-1 mb-2">
+        <button
+          onClick={() => setPreview(false)}
+          className={`flex items-center gap-1 text-[10px] px-2 py-1 rounded transition-all
+            ${!preview ? 'bg-bg-elevated text-text-secondary' : 'text-text-muted hover:text-text-secondary'}`}>
+          <Edit size={9} /> escribir
+        </button>
+        <button
+          onClick={() => setPreview(true)}
+          className={`flex items-center gap-1 text-[10px] px-2 py-1 rounded transition-all
+            ${preview ? 'bg-bg-elevated text-text-secondary' : 'text-text-muted hover:text-text-secondary'}`}>
+          <Eye size={9} /> preview
+        </button>
+      </div>
+
+      {preview ? (
+        <div className="min-h-[96px] text-xs text-text-secondary leading-relaxed">
+          {content ? (
+            <ReactMarkdown
+              components={{
+                h1: ({ children }) => <h1 className="text-sm font-semibold text-text-primary mt-3 mb-1">{children}</h1>,
+                h2: ({ children }) => <h2 className="text-xs font-semibold text-text-primary mt-2 mb-1">{children}</h2>,
+                p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+                strong: ({ children }) => <strong className="font-semibold text-text-primary">{children}</strong>,
+                em: ({ children }) => <em className="italic">{children}</em>,
+                ul: ({ children }) => <ul className="list-disc list-inside space-y-0.5 mb-2">{children}</ul>,
+                ol: ({ children }) => <ol className="list-decimal list-inside space-y-0.5 mb-2">{children}</ol>,
+                li: ({ children }) => <li>{children}</li>,
+                code: ({ children }) => <code className="bg-bg-elevated px-1 py-0.5 rounded text-[11px] font-mono text-accent">{children}</code>,
+                blockquote: ({ children }) => <blockquote className="border-l-2 border-amber-note-border pl-3 text-text-muted italic my-2">{children}</blockquote>,
+                a: ({ href, children }) => <a href={href} target="_blank" rel="noopener noreferrer" className="text-accent underline underline-offset-2">{children}</a>,
+              }}
+            >
+              {content}
+            </ReactMarkdown>
+          ) : (
+            <span className="text-text-muted italic">nada que previsualizar todavía...</span>
+          )}
+        </div>
+      ) : (
+        <textarea
+          value={content}
+          onChange={e => setContent(e.target.value)}
+          placeholder={`escribí en markdown:\n# título\n**negrita**, *itálica*\n- lista\n> cita`}
+          rows={6}
+          className="w-full bg-transparent text-xs text-text-secondary placeholder:text-text-muted outline-none leading-relaxed font-mono resize-none"
+        />
+      )}
+
       <input
         value={tags}
         onChange={e => setTags(e.target.value)}
