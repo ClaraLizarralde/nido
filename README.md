@@ -1,4 +1,4 @@
-# 🪴 nido
+#  nido (L) 
 
 Tu hogar personal de internet. Guardá links, seguí feeds RSS y escribí notas, todo organizado por tus intereses.
 
