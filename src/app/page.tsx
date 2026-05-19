@@ -1,31 +1,32 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Rss, Bookmark, FileText, Loader2 } from 'lucide-react'
+import { Rss, Bookmark, FileText, Upload, Loader2 } from 'lucide-react'
 import Sidebar from '@/components/Sidebar'
 import BookmarksTab from '@/components/BookmarksTab'
 import NotesTab from '@/components/NotesTab'
 import FeedTab from '@/components/FeedTab'
+import GlobalSearch from '@/components/GlobalSearch'
+import ImportModal from '@/components/ImportModal'
 import type { Space, TabType } from '@/lib/types'
 import { createClient } from '@/lib/supabase'
 
 export default function Home() {
   const [spaces, setSpaces] = useState<Space[]>([])
-  const [activeSpaceId, setActiveSpaceId] = useState<string | 'inicio' | null>(null)
+  const [activeSpaceId, setActiveSpaceId] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<TabType>('feed')
   const [loading, setLoading] = useState(true)
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [showImport, setShowImport] = useState(false)
   const supabase = createClient()
 
-  useEffect(() => {
-    loadSpaces()
-  }, [])
+  useEffect(() => { loadSpaces() }, [])
 
   async function loadSpaces() {
     const { data } = await supabase.from('spaces').select('*').order('order_index')
     if (data && data.length > 0) {
       setSpaces(data)
-      setActiveSpaceId('inicio')
+      setActiveSpaceId(data[0].id)
     }
     setLoading(false)
   }
@@ -40,8 +41,12 @@ export default function Home() {
     }
   }
 
+  function handleSearchNavigate(spaceId: string, tab: 'bookmarks' | 'notes' | 'feed') {
+    setActiveSpaceId(spaceId)
+    setActiveTab(tab)
+  }
+
   const activeSpace = spaces.find(s => s.id === activeSpaceId)
-  const isInicio = activeSpaceId === 'inicio'
 
   if (loading) {
     return (
@@ -73,60 +78,73 @@ export default function Home() {
       </div>
 
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        <header className="flex-shrink-0 flex items-center gap-3 px-4 lg:px-5 py-3.5 bg-bg-surface border-b border-border-subtle">
-          <button className="lg:hidden text-text-muted hover:text-text-primary" onClick={() => setSidebarOpen(true)}>
+        <header className="flex-shrink-0 flex items-center gap-2 px-4 lg:px-5 py-3 bg-bg-surface border-b border-border-subtle">
+          {/* Mobile menu */}
+          <button className="lg:hidden text-text-muted hover:text-text-primary mr-1" onClick={() => setSidebarOpen(true)}>
             <svg width="18" height="14" viewBox="0 0 18 14" fill="none">
               <path d="M0 1h18M0 7h18M0 13h18" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
             </svg>
           </button>
 
-          {isInicio ? (
-            <div className="font-serif text-base font-medium text-text-primary">🏠 Inicio</div>
-          ) : activeSpace ? (
-            <div className="font-serif text-base font-medium text-text-primary flex items-center gap-2">
+          {activeSpace ? (
+            <div className="font-serif text-base font-medium text-text-primary flex items-center gap-2 flex-shrink-0">
               <span>{activeSpace.emoji}</span>
-              <span>{activeSpace.name}</span>
+              <span className="hidden sm:inline">{activeSpace.name}</span>
             </div>
           ) : (
-            <div className="font-serif text-base text-text-muted">seleccioná un espacio</div>
+            <div className="font-serif text-base text-text-muted">nido</div>
           )}
 
-          {(isInicio || activeSpace) && (
-            <div className="flex gap-1 ml-auto">
+          {/* Tabs */}
+          {activeSpace && (
+            <div className="flex gap-1 ml-3">
               <TabBtn active={activeTab === 'feed'} onClick={() => setActiveTab('feed')} icon={<Rss size={13} />} label="novedades" />
               <TabBtn active={activeTab === 'bookmarks'} onClick={() => setActiveTab('bookmarks')} icon={<Bookmark size={13} />} label="guardados" />
               <TabBtn active={activeTab === 'notes'} onClick={() => setActiveTab('notes')} icon={<FileText size={13} />} label="notas" />
             </div>
           )}
+
+          {/* Right side: search + import */}
+          <div className="ml-auto flex items-center gap-2">
+            <GlobalSearch spaces={spaces} onNavigate={handleSearchNavigate} />
+            <button
+              onClick={() => setShowImport(true)}
+              title="importar bookmarks"
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-bg-elevated border border-border-subtle rounded-lg text-xs text-text-muted hover:text-text-secondary hover:border-border-default transition-all"
+            >
+              <Upload size={12} />
+              <span className="hidden sm:inline">importar</span>
+            </button>
+          </div>
         </header>
 
-        <div className="flex-1 overflow-hidden flex flex-col">
-          {isInicio ? (
-            <>
-              {activeTab === 'feed' && <FeedTab spaceId={null} allSpaces={spaces} />}
-              {activeTab === 'bookmarks' && <BookmarksTab spaceId={null} allSpaces={spaces} />}
-              {activeTab === 'notes' && <NotesTab spaceId={null} allSpaces={spaces} />}
-            </>
-          ) : activeSpace ? (
-            <>
-              {activeTab === 'feed' && <FeedTab key={activeSpaceId} spaceId={activeSpaceId!} allSpaces={null} />}
-              {activeTab === 'bookmarks' && <BookmarksTab key={activeSpaceId} spaceId={activeSpaceId!} allSpaces={null} />}
-              {activeTab === 'notes' && <NotesTab key={activeSpaceId} spaceId={activeSpaceId!} allSpaces={null} />}
-            </>
-          ) : (
-            <EmptyHome />
-          )}
-        </div>
+        {!activeSpace ? (
+          <EmptyHome />
+        ) : (
+          <div className="flex-1 overflow-hidden flex flex-col">
+            {activeTab === 'feed' && <FeedTab key={activeSpaceId} spaceId={activeSpaceId!} />}
+            {activeTab === 'bookmarks' && <BookmarksTab key={activeSpaceId} spaceId={activeSpaceId!} />}
+            {activeTab === 'notes' && <NotesTab key={activeSpaceId} spaceId={activeSpaceId!} />}
+          </div>
+        )}
       </div>
+
+      {showImport && (
+        <ImportModal
+          spaces={spaces}
+          onClose={() => setShowImport(false)}
+          onImported={(count) => {
+            setShowImport(false)
+            setActiveTab('bookmarks')
+          }}
+        />
+      )}
     </div>
   )
 }
 
 function TabBtn({ active, onClick, icon, label }: {
-  active: boolean
-  onClick: () => void
-  icon: React.ReactNode
-  label: string
+  active: boolean; onClick: () => void; icon: React.ReactNode; label: string
 }) {
   return (
     <button onClick={onClick}
