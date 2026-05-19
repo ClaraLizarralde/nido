@@ -55,7 +55,7 @@ export default function BookmarksTab({ spaceId }: BookmarksTabProps) {
     return true
   })
 
-const allTags = Array.from(new Set(bookmarks.flatMap(b => b.tags)))
+  const allTags = Array.from(new Set(bookmarks.flatMap(b => b.tags)))
 
   return (
     <div className="flex-1 overflow-y-auto">
