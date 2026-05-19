@@ -267,4 +267,62 @@ function AddBookmarkModal({ spaceId, onClose, onAdded }: {
     const { data } = await supabase.from('bookmarks').insert({
       space_id: spaceId,
       url, title, description,
-      ima
+      image_url: image || null,
+      tags: tagArray,
+      is_favorite: false,
+      is_read_later: false,
+    }).select().single()
+    if (data) onAdded(data)
+    setLoading(false)
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-bg-surface border border-border-default rounded-2xl w-full max-w-md p-5 animate-slide-up" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="font-serif text-base font-medium text-text-primary">agregar link</h3>
+          <button onClick={onClose} className="text-text-muted hover:text-text-primary"><X size={16} /></button>
+        </div>
+
+        <div className="space-y-3">
+          <div>
+            <label className="text-xs text-text-muted mb-1 block">URL</label>
+            <input value={url} onChange={e => setUrl(e.target.value)} onBlur={handleUrlBlur}
+              placeholder="https://..."
+              className="w-full bg-bg-elevated border border-border-subtle rounded-lg px-3 py-2 text-sm text-text-primary placeholder:text-text-muted outline-none focus:border-accent-border" />
+          </div>
+
+          {fetching && <div className="flex items-center gap-2 text-xs text-text-muted"><Loader2 size={12} className="animate-spin" /> obteniendo info...</div>}
+          {image && <img src={image} alt="" className="w-full h-32 object-cover rounded-lg border border-border-subtle" />}
+
+          <div>
+            <label className="text-xs text-text-muted mb-1 block">título</label>
+            <input value={title} onChange={e => setTitle(e.target.value)}
+              placeholder="título del link"
+              className="w-full bg-bg-elevated border border-border-subtle rounded-lg px-3 py-2 text-sm text-text-primary placeholder:text-text-muted outline-none focus:border-accent-border" />
+          </div>
+
+          <div>
+            <label className="text-xs text-text-muted mb-1 block">descripción (opcional)</label>
+            <textarea value={description} onChange={e => setDescription(e.target.value)} rows={2}
+              placeholder="breve descripción..."
+              className="w-full bg-bg-elevated border border-border-subtle rounded-lg px-3 py-2 text-sm text-text-primary placeholder:text-text-muted outline-none focus:border-accent-border" />
+          </div>
+
+          <div>
+            <label className="text-xs text-text-muted mb-1 block">tags (separados por coma)</label>
+            <input value={tags} onChange={e => setTags(e.target.value)}
+              placeholder="diseño, referencia, tool..."
+              className="w-full bg-bg-elevated border border-border-subtle rounded-lg px-3 py-2 text-sm text-text-primary placeholder:text-text-muted outline-none focus:border-accent-border" />
+          </div>
+
+          <button onClick={handleSave} disabled={!url || !title || loading}
+            className="w-full py-2.5 bg-accent text-white rounded-lg text-sm font-medium hover:opacity-90 disabled:opacity-40 flex items-center justify-center gap-2">
+            {loading && <Loader2 size={14} className="animate-spin" />}
+            guardar link
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
