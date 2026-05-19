@@ -2,15 +2,16 @@
 
 import { useState, useEffect } from 'react'
 import { Plus, X, Loader2, Trash2, Edit3, Check } from 'lucide-react'
-import type { Note } from '@/lib/types'
+import type { Note, Space } from '@/lib/types'
 import { createClient } from '@/lib/supabase'
 import { formatRelativeTime } from '@/lib/utils'
 
 interface NotesTabProps {
-  spaceId: string
+  spaceId: string | null
+  allSpaces: Space[] | null
 }
 
-export default function NotesTab({ spaceId }: NotesTabProps) {
+export default function NotesTab({ spaceId, allSpaces }: NotesTabProps) {
   const [notes, setNotes] = useState<Note[]>([])
   const [loading, setLoading] = useState(true)
   const [showAdd, setShowAdd] = useState(false)
@@ -23,16 +24,17 @@ export default function NotesTab({ spaceId }: NotesTabProps) {
 
   async function loadNotes() {
     setLoading(true)
-    const { data } = await supabase
-      .from('notes')
-      .select('*')
-      .eq('space_id', spaceId)
-      .order('updated_at', { ascending: false })
+    let query = supabase.from('notes').select('*').order('updated_at', { ascending: false })
+    if (spaceId) {
+      query = query.eq('space_id', spaceId)
+    }
+    const { data } = await query
     setNotes(data || [])
     setLoading(false)
   }
 
   async function addNote(title: string, content: string, tags: string[]) {
+    if (!spaceId) return
     const { data } = await supabase.from('notes').insert({
       space_id: spaceId, title, content, tags
     }).select().single()
@@ -55,11 +57,13 @@ export default function NotesTab({ spaceId }: NotesTabProps) {
     <div className="flex-1 overflow-y-auto">
       <div className="sticky top-0 z-10 bg-bg-base border-b border-border-subtle px-5 py-3 flex items-center">
         <span className="text-xs text-text-muted">{notes.length} nota{notes.length !== 1 ? 's' : ''}</span>
-        <button onClick={() => setShowAdd(true)}
-          className="ml-auto flex items-center gap-1.5 text-xs px-3 py-1.5 bg-accent text-white rounded-lg hover:opacity-90 font-medium">
-          <Plus size={13} />
-          nueva nota
-        </button>
+        {spaceId && (
+          <button onClick={() => setShowAdd(true)}
+            className="ml-auto flex items-center gap-1.5 text-xs px-3 py-1.5 bg-accent text-white rounded-lg hover:opacity-90 font-medium">
+            <Plus size={13} />
+            nueva nota
+          </button>
+        )}
       </div>
 
       <div className="p-5">
@@ -67,12 +71,12 @@ export default function NotesTab({ spaceId }: NotesTabProps) {
           <div className="flex justify-center py-16"><Loader2 size={20} className="text-text-muted animate-spin" /></div>
         ) : (
           <div className="columns-1 sm:columns-2 lg:columns-3 gap-3 space-y-3">
-            {showAdd && (
+            {showAdd && spaceId && (
               <div className="break-inside-avoid mb-3">
                 <NoteForm onSave={addNote} onCancel={() => setShowAdd(false)} />
               </div>
             )}
-            {notes.length === 0 && !showAdd && <EmptyNotes onAdd={() => setShowAdd(true)} />}
+            {notes.length === 0 && !showAdd && <EmptyNotes onAdd={spaceId ? () => setShowAdd(true) : null} />}
             {notes.map(note => (
               <div key={note.id} className="break-inside-avoid mb-3">
                 {editing === note.id ? (
@@ -83,7 +87,12 @@ export default function NotesTab({ spaceId }: NotesTabProps) {
                     onCancel={() => setEditing(null)}
                   />
                 ) : (
-                  <NoteCard note={note} onEdit={() => setEditing(note.id)} onDelete={() => deleteNote(note.id)} />
+                  <NoteCard
+                    note={note}
+                    spaceName={allSpaces ? allSpaces.find(s => s.id === note.space_id)?.name : undefined}
+                    onEdit={() => setEditing(note.id)}
+                    onDelete={() => deleteNote(note.id)}
+                  />
                 )}
               </div>
             ))}
@@ -94,7 +103,12 @@ export default function NotesTab({ spaceId }: NotesTabProps) {
   )
 }
 
-function NoteCard({ note, onEdit, onDelete }: { note: Note; onEdit: () => void; onDelete: () => void }) {
+function NoteCard({ note, spaceName, onEdit, onDelete }: {
+  note: Note
+  spaceName?: string
+  onEdit: () => void
+  onDelete: () => void
+}) {
   const [hovered, setHovered] = useState(false)
 
   return (
@@ -104,6 +118,9 @@ function NoteCard({ note, onEdit, onDelete }: { note: Note; onEdit: () => void; 
       className="relative bg-amber-note-bg border border-amber-note-border rounded-xl p-4 group"
       style={{ borderLeft: '3px solid rgba(245,166,35,0.4)' }}
     >
+      {spaceName && (
+        <span className="text-[10px] px-1.5 py-0.5 bg-bg-elevated text-text-muted rounded mb-2 inline-block">{spaceName}</span>
+      )}
       <h4 className="font-medium text-sm text-text-primary mb-2 leading-snug">{note.title}</h4>
       <p className="text-xs text-text-secondary leading-relaxed whitespace-pre-wrap">{note.content}</p>
 
@@ -178,16 +195,18 @@ function NoteForm({ initialTitle = '', initialContent = '', onSave, onCancel }: 
   )
 }
 
-function EmptyNotes({ onAdd }: { onAdd: () => void }) {
+function EmptyNotes({ onAdd }: { onAdd: (() => void) | null }) {
   return (
     <div className="col-span-full flex flex-col items-center justify-center py-20 text-center">
       <div className="text-4xl mb-4">📝</div>
       <div className="text-text-secondary text-sm mb-1">Sin notas</div>
       <div className="text-text-muted text-xs mb-5">Guardá ideas, listas, referencias, mini diarios</div>
-      <button onClick={onAdd}
-        className="flex items-center gap-2 text-sm px-4 py-2 bg-accent text-white rounded-lg hover:opacity-90">
-        <Plus size={14} /> nueva nota
-      </button>
+      {onAdd && (
+        <button onClick={onAdd}
+          className="flex items-center gap-2 text-sm px-4 py-2 bg-accent text-white rounded-lg hover:opacity-90">
+          <Plus size={14} /> nueva nota
+        </button>
+      )}
     </div>
   )
 }

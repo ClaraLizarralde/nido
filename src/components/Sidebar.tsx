@@ -1,13 +1,13 @@
 'use client'
 
 import { useState } from 'react'
-import { Plus, Hash, Search } from 'lucide-react'
+import { Plus, Search, Home } from 'lucide-react'
 import type { Space } from '@/lib/types'
 
 interface SidebarProps {
   spaces: Space[]
   activeSpaceId: string | null
-  onSelectSpace: (id: string) => void
+  onSelectSpace: (id: string | 'inicio') => void
   onAddSpace: (name: string, emoji: string) => void
 }
 
@@ -35,6 +35,21 @@ export default function Sidebar({ spaces, activeSpaceId, onSelectSpace, onAddSpa
       <div className="px-4 pt-5 pb-4 border-b border-border-subtle">
         <div className="font-serif text-lg font-medium text-text-primary tracking-tight">nido</div>
         <div className="text-xs text-text-muted mt-0.5">tu internet, organizado</div>
+      </div>
+
+      {/* Inicio */}
+      <div className="px-2 pt-3">
+        <button
+          onClick={() => onSelectSpace('inicio')}
+          className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-all
+            ${activeSpaceId === 'inicio'
+              ? 'bg-accent-soft text-accent font-medium'
+              : 'text-text-secondary hover:bg-bg-elevated hover:text-text-primary'
+            }`}
+        >
+          <Home size={15} />
+          <span>Inicio</span>
+        </button>
       </div>
 
       {/* Search */}
@@ -75,7 +90,6 @@ export default function Sidebar({ spaces, activeSpaceId, onSelectSpace, onAddSpa
           </button>
         ))}
 
-        {/* Add space inline form */}
         {adding && (
           <div className="mt-2 px-2 py-3 bg-bg-elevated rounded-lg border border-border-subtle animate-fade-in">
             <div className="flex flex-wrap gap-1.5 mb-2">

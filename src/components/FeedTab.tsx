@@ -2,15 +2,16 @@
 
 import { useState, useEffect } from 'react'
 import { Plus, Rss, RefreshCw, X, Loader2, ExternalLink, Trash2 } from 'lucide-react'
-import type { FeedSource, FeedItem } from '@/lib/types'
+import type { FeedSource, FeedItem, Space } from '@/lib/types'
 import { createClient } from '@/lib/supabase'
 import { getFaviconUrl, formatRelativeTime } from '@/lib/utils'
 
 interface FeedTabProps {
-  spaceId: string
+  spaceId: string | null
+  allSpaces: Space[] | null
 }
 
-export default function FeedTab({ spaceId }: FeedTabProps) {
+export default function FeedTab({ spaceId, allSpaces }: FeedTabProps) {
   const [sources, setSources] = useState<FeedSource[]>([])
   const [items, setItems] = useState<FeedItem[]>([])
   const [loading, setLoading] = useState(true)
@@ -25,10 +26,15 @@ export default function FeedTab({ spaceId }: FeedTabProps) {
 
   async function loadData() {
     setLoading(true)
-    const [{ data: srcs }, { data: its }] = await Promise.all([
-      supabase.from('feed_sources').select('*').eq('space_id', spaceId).order('created_at'),
-      supabase.from('feed_items').select('*, feed_sources(name, favicon_url)').eq('space_id', spaceId).order('published_at', { ascending: false }).limit(100)
-    ])
+    let srcQuery = supabase.from('feed_sources').select('*').order('created_at')
+    let itsQuery = supabase.from('feed_items').select('*, feed_sources(name, favicon_url)').order('published_at', { ascending: false }).limit(100)
+
+    if (spaceId) {
+      srcQuery = srcQuery.eq('space_id', spaceId)
+      itsQuery = itsQuery.eq('space_id', spaceId)
+    }
+
+    const [{ data: srcs }, { data: its }] = await Promise.all([srcQuery, itsQuery])
     setSources(srcs || [])
     setItems(its || [])
     setLoading(false)
@@ -49,7 +55,6 @@ export default function FeedTab({ spaceId }: FeedTabProps) {
     const res = await fetch(`/api/feed?url=${encodeURIComponent(source.url)}`)
     const xml = await res.text()
 
-    // Simple XML parser
     const parser = new DOMParser()
     const doc = parser.parseFromString(xml, 'text/xml')
     const entries = Array.from(doc.querySelectorAll('item, entry'))
@@ -63,13 +68,12 @@ export default function FeedTab({ spaceId }: FeedTabProps) {
         return ''
       }
       const getAttr = (name: string, attr: string) => entry.querySelector(name)?.getAttribute(attr) || ''
-
       const link = getAttr('link', 'href') || getEl(['link', 'guid'])
       const pubDate = getEl(['pubDate', 'published', 'updated', 'dc\\:date'])
 
       return {
         feed_source_id: source.id,
-        space_id: spaceId,
+        space_id: source.space_id,
         title: getEl(['title']),
         url: link,
         description: getEl(['description', 'summary', 'content']).replace(/<[^>]+>/g, '').slice(0, 300),
@@ -84,6 +88,7 @@ export default function FeedTab({ spaceId }: FeedTabProps) {
   }
 
   async function addSource(name: string, url: string, type: FeedSource['type']) {
+    if (!spaceId) return
     const { data } = await supabase.from('feed_sources').insert({
       space_id: spaceId, name, url, type,
       favicon_url: `https://www.google.com/s2/favicons?domain=${new URL(url).origin}&sz=32`
@@ -135,6 +140,7 @@ export default function FeedTab({ spaceId }: FeedTabProps) {
 
           {sources.map(src => {
             const srcUnread = items.filter(i => i.feed_source_id === src.id && !i.is_read).length
+            const spaceName = allSpaces ? allSpaces.find(s => s.id === src.space_id)?.name : undefined
             return (
               <button key={src.id} onClick={() => setActiveSource(src.id)}
                 className={`w-full flex items-center gap-2 px-3 py-2 text-xs group transition-all
@@ -143,7 +149,10 @@ export default function FeedTab({ spaceId }: FeedTabProps) {
                   ? <img src={src.favicon_url} alt="" className="w-3.5 h-3.5 rounded-sm flex-shrink-0" />
                   : <Rss size={11} className="flex-shrink-0" />
                 }
-                <span className="flex-1 text-left truncate">{src.name}</span>
+                <span className="flex-1 text-left truncate">
+                  {src.name}
+                  {spaceName && <span className="block text-[9px] text-text-muted opacity-70">{spaceName}</span>}
+                </span>
                 {srcUnread > 0 && <span className="text-[9px] w-4 h-4 flex items-center justify-center rounded-full bg-accent/20 text-accent">{srcUnread}</span>}
                 <button onClick={e => { e.stopPropagation(); deleteSource(src.id) }}
                   className="opacity-0 group-hover:opacity-100 hover:text-red-400 ml-1 flex-shrink-0">
@@ -153,12 +162,14 @@ export default function FeedTab({ spaceId }: FeedTabProps) {
             )
           })}
         </div>
-        <div className="p-2 border-t border-border-subtle">
-          <button onClick={() => setShowAddSource(true)}
-            className="w-full flex items-center justify-center gap-1.5 text-xs py-2 bg-bg-elevated hover:bg-bg-overlay rounded-lg text-text-muted hover:text-text-secondary border border-border-subtle">
-            <Plus size={12} /> agregar feed
-          </button>
-        </div>
+        {spaceId && (
+          <div className="p-2 border-t border-border-subtle">
+            <button onClick={() => setShowAddSource(true)}
+              className="w-full flex items-center justify-center gap-1.5 text-xs py-2 bg-bg-elevated hover:bg-bg-overlay rounded-lg text-text-muted hover:text-text-secondary border border-border-subtle">
+              <Plus size={12} /> agregar feed
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Feed items */}
@@ -166,7 +177,7 @@ export default function FeedTab({ spaceId }: FeedTabProps) {
         {loading ? (
           <div className="flex justify-center py-16"><Loader2 size={20} className="text-text-muted animate-spin" /></div>
         ) : filtered.length === 0 ? (
-          <EmptyFeed onAdd={() => setShowAddSource(true)} hasSources={sources.length > 0} />
+          <EmptyFeed onAdd={spaceId ? () => setShowAddSource(true) : null} hasSources={sources.length > 0} />
         ) : (
           <div className="divide-y divide-border-subtle">
             {filtered.map(item => (
@@ -176,7 +187,7 @@ export default function FeedTab({ spaceId }: FeedTabProps) {
         )}
       </div>
 
-      {showAddSource && (
+      {showAddSource && spaceId && (
         <AddSourceModal onClose={() => setShowAddSource(false)} onAdd={addSource} />
       )}
     </div>
@@ -192,9 +203,7 @@ function FeedItemRow({ item, onRead }: { item: FeedItem; onRead: () => void }) {
         ${!item.is_read ? '' : 'opacity-60'}`}
       onClick={() => { onRead(); window.open(item.url, '_blank') }}
     >
-      {!item.is_read && (
-        <div className="w-1.5 h-1.5 rounded-full bg-rss-dot mt-2 flex-shrink-0" />
-      )}
+      {!item.is_read && <div className="w-1.5 h-1.5 rounded-full bg-rss-dot mt-2 flex-shrink-0" />}
       {item.is_read && <div className="w-1.5 flex-shrink-0" />}
 
       <div className="flex-1 min-w-0">
@@ -216,7 +225,7 @@ function FeedItemRow({ item, onRead }: { item: FeedItem; onRead: () => void }) {
   )
 }
 
-function EmptyFeed({ onAdd, hasSources }: { onAdd: () => void; hasSources: boolean }) {
+function EmptyFeed({ onAdd, hasSources }: { onAdd: (() => void) | null; hasSources: boolean }) {
   return (
     <div className="flex flex-col items-center justify-center py-20 text-center">
       <div className="text-4xl mb-4">📡</div>
@@ -226,7 +235,7 @@ function EmptyFeed({ onAdd, hasSources }: { onAdd: () => void; hasSources: boole
       <div className="text-text-muted text-xs mb-5">
         {hasSources ? 'Refrescá para buscar novedades' : 'Agregá blogs, YouTube, noticias que querés seguir'}
       </div>
-      {!hasSources && (
+      {onAdd && (
         <button onClick={onAdd}
           className="flex items-center gap-2 text-sm px-4 py-2 bg-accent text-white rounded-lg hover:opacity-90">
           <Plus size={14} /> agregar primer feed
