@@ -81,7 +81,7 @@ export default function ImportModal({ spaces, onClose, onImported }: ImportModal
         setError('No se encontraron bookmarks en el archivo. Asegurate de exportar en formato HTML desde tu browser.')
         return
       }
-      const uniqueFolders = [...new Set(items.map(i => i.folder || 'Sin carpeta'))]
+const uniqueFolders = Array.from(new Set(items.map(i => i.folder || 'Sin carpeta')))
       setFolders(uniqueFolders)
       setFolderMap(Object.fromEntries(uniqueFolders.map(f => [f, true])))
       setParsed(items)
