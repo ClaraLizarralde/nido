@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { Plus, X, Loader2, Trash2, Edit3, Check, Eye, Edit } from 'lucide-react'
+import { useState, useEffect, useRef } from 'react'
+import { Plus, X, Loader2, Trash2, Edit3, Check, Eye, Edit, FolderInput } from 'lucide-react'
 import type { Note, Space } from '@/lib/types'
 import { createClient } from '@/lib/supabase'
 import { formatRelativeTime } from '@/lib/utils'
@@ -19,9 +19,7 @@ export default function NotesTab({ spaceId, allSpaces }: NotesTabProps) {
   const [editing, setEditing] = useState<string | null>(null)
   const supabase = createClient()
 
-  useEffect(() => {
-    loadNotes()
-  }, [spaceId])
+  useEffect(() => { loadNotes() }, [spaceId])
 
   async function loadNotes() {
     setLoading(true)
@@ -51,6 +49,13 @@ export default function NotesTab({ spaceId, allSpaces }: NotesTabProps) {
     await supabase.from('notes').delete().eq('id', id)
     setNotes(prev => prev.filter(n => n.id !== id))
   }
+
+  async function moveNote(id: string, targetSpaceId: string) {
+    await supabase.from('notes').update({ space_id: targetSpaceId }).eq('id', id)
+    setNotes(prev => prev.filter(n => n.id !== id))
+  }
+
+  const otherSpaces = (allSpaces || []).filter(s => s.id !== spaceId)
 
   return (
     <div className="flex-1 overflow-y-auto">
@@ -87,9 +92,10 @@ export default function NotesTab({ spaceId, allSpaces }: NotesTabProps) {
                 ) : (
                   <NoteCard
                     note={note}
-                    spaceName={allSpaces ? allSpaces.find(s => s.id === note.space_id)?.name : undefined}
+                    otherSpaces={otherSpaces}
                     onEdit={() => setEditing(note.id)}
                     onDelete={() => deleteNote(note.id)}
+                    onMove={(targetId) => moveNote(note.id, targetId)}
                   />
                 )}
               </div>
@@ -101,24 +107,35 @@ export default function NotesTab({ spaceId, allSpaces }: NotesTabProps) {
   )
 }
 
-function NoteCard({ note, spaceName, onEdit, onDelete }: {
+function NoteCard({ note, otherSpaces, onEdit, onDelete, onMove }: {
   note: Note
-  spaceName?: string
+  otherSpaces: Space[]
   onEdit: () => void
   onDelete: () => void
+  onMove: (targetSpaceId: string) => void
 }) {
   const [hovered, setHovered] = useState(false)
+  const [showMove, setShowMove] = useState(false)
+  const moveRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!showMove) return
+    function handleClick(e: MouseEvent) {
+      if (moveRef.current && !moveRef.current.contains(e.target as Node)) {
+        setShowMove(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [showMove])
 
   return (
     <div
       onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
+      onMouseLeave={() => { setHovered(false); setShowMove(false) }}
       className="relative bg-amber-note-bg border border-amber-note-border rounded-xl p-4 group"
       style={{ borderLeft: '3px solid rgba(245,166,35,0.4)' }}
     >
-      {spaceName && (
-        <span className="text-[10px] px-1.5 py-0.5 bg-bg-elevated text-text-muted rounded mb-2 inline-block">{spaceName}</span>
-      )}
       <h4 className="font-medium text-sm text-text-primary mb-3 leading-snug">{note.title}</h4>
 
       <div className="prose-nido text-xs text-text-secondary leading-relaxed">
@@ -154,10 +171,35 @@ function NoteCard({ note, spaceName, onEdit, onDelete }: {
       <div className="mt-3 text-[10px] text-text-muted">{formatRelativeTime(note.updated_at)}</div>
 
       <div className={`absolute top-2 right-2 flex gap-1 transition-opacity ${hovered ? 'opacity-100' : 'opacity-0'}`}>
-        <button onClick={onEdit} className="p-1.5 rounded-md bg-bg-base/80 backdrop-blur border border-border-subtle text-text-muted hover:text-text-primary">
+        <button onClick={onEdit}
+          className="p-1.5 rounded-md bg-bg-base/80 backdrop-blur border border-border-subtle text-text-muted hover:text-text-primary">
           <Edit3 size={10} />
         </button>
-        <button onClick={onDelete} className="p-1.5 rounded-md bg-bg-base/80 backdrop-blur border border-border-subtle text-text-muted hover:text-red-400">
+        {otherSpaces.length > 0 && (
+          <div className="relative" ref={moveRef}>
+            <button
+              onClick={() => setShowMove(v => !v)}
+              title="mover a..."
+              className="p-1.5 rounded-md bg-bg-base/80 backdrop-blur border border-border-subtle text-text-muted hover:text-text-primary">
+              <FolderInput size={10} />
+            </button>
+            {showMove && (
+              <div className="absolute top-7 right-0 z-20 bg-bg-surface border border-border-default rounded-xl shadow-lg py-1.5 w-44">
+                <div className="text-[10px] text-text-muted px-3 py-1 border-b border-border-subtle mb-1">mover a...</div>
+                {otherSpaces.map(space => (
+                  <button key={space.id}
+                    onClick={() => { onMove(space.id); setShowMove(false) }}
+                    className="w-full text-left flex items-center gap-2 px-3 py-1.5 text-xs text-text-secondary hover:bg-bg-elevated transition-colors">
+                    <span>{space.emoji}</span>
+                    <span>{space.name}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+        <button onClick={onDelete}
+          className="p-1.5 rounded-md bg-bg-base/80 backdrop-blur border border-border-subtle text-text-muted hover:text-red-400">
           <Trash2 size={10} />
         </button>
       </div>
@@ -179,7 +221,6 @@ function NoteForm({ initialTitle = '', initialContent = '', onSave, onCancel }: 
   return (
     <div className="bg-amber-note-bg border border-amber-note-border rounded-xl p-4 animate-fade-in"
       style={{ borderLeft: '3px solid rgba(245,166,35,0.5)' }}>
-
       <input
         autoFocus
         value={title}
@@ -187,23 +228,18 @@ function NoteForm({ initialTitle = '', initialContent = '', onSave, onCancel }: 
         placeholder="título de la nota..."
         className="w-full bg-transparent text-sm font-medium text-text-primary placeholder:text-text-muted outline-none mb-3"
       />
-
-      {/* toggle editar / preview */}
       <div className="flex gap-1 mb-2">
-        <button
-          onClick={() => setPreview(false)}
+        <button onClick={() => setPreview(false)}
           className={`flex items-center gap-1 text-[10px] px-2 py-1 rounded transition-all
             ${!preview ? 'bg-bg-elevated text-text-secondary' : 'text-text-muted hover:text-text-secondary'}`}>
           <Edit size={9} /> escribir
         </button>
-        <button
-          onClick={() => setPreview(true)}
+        <button onClick={() => setPreview(true)}
           className={`flex items-center gap-1 text-[10px] px-2 py-1 rounded transition-all
             ${preview ? 'bg-bg-elevated text-text-secondary' : 'text-text-muted hover:text-text-secondary'}`}>
           <Eye size={9} /> preview
         </button>
       </div>
-
       {preview ? (
         <div className="min-h-[96px] text-xs text-text-secondary leading-relaxed">
           {content ? (
@@ -237,7 +273,6 @@ function NoteForm({ initialTitle = '', initialContent = '', onSave, onCancel }: 
           className="w-full bg-transparent text-xs text-text-secondary placeholder:text-text-muted outline-none leading-relaxed font-mono resize-none"
         />
       )}
-
       <input
         value={tags}
         onChange={e => setTags(e.target.value)}
@@ -248,8 +283,7 @@ function NoteForm({ initialTitle = '', initialContent = '', onSave, onCancel }: 
         <button
           onClick={() => onSave(title, content, tags.split(',').map(t => t.trim()).filter(Boolean))}
           disabled={!title}
-          className="flex items-center gap-1 text-xs px-3 py-1.5 bg-accent text-white rounded-lg hover:opacity-90 disabled:opacity-40"
-        >
+          className="flex items-center gap-1 text-xs px-3 py-1.5 bg-accent text-white rounded-lg hover:opacity-90 disabled:opacity-40">
           <Check size={12} /> guardar
         </button>
         <button onClick={onCancel} className="text-xs px-3 py-1.5 text-text-muted hover:text-text-secondary rounded-lg">

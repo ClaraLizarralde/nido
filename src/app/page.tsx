@@ -58,7 +58,6 @@ export default function Home() {
     setActiveTab(tab)
   }
 
-  // Al cambiar de espacio, volver siempre a "todo"
   function handleSelectSpace(id: string) {
     setActiveSpaceId(id)
     setActiveTab('todo')
@@ -100,7 +99,6 @@ export default function Home() {
 
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         <header className="flex-shrink-0 flex items-center gap-2 px-4 lg:px-5 py-3 bg-bg-surface border-b border-border-subtle">
-          {/* Mobile menu */}
           <button className="lg:hidden text-text-muted hover:text-text-primary mr-1" onClick={() => setSidebarOpen(true)}>
             <svg width="18" height="14" viewBox="0 0 18 14" fill="none">
               <path d="M0 1h18M0 7h18M0 13h18" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
@@ -116,17 +114,15 @@ export default function Home() {
             <div className="font-serif text-base text-text-muted">nido</div>
           )}
 
-          {/* Tabs */}
           {activeSpace && (
             <div className="flex gap-1 ml-3">
-              <TabBtn active={activeTab === 'todo'} onClick={() => setActiveTab('todo')} icon={<LayoutGrid size={13} />} label="todo" />
-              <TabBtn active={activeTab === 'bookmarks'} onClick={() => setActiveTab('bookmarks')} icon={<Bookmark size={13} />} label="links" />
-              <TabBtn active={activeTab === 'feed'} onClick={() => setActiveTab('feed')} icon={<Rss size={13} />} label="rss" />
-              <TabBtn active={activeTab === 'notes'} onClick={() => setActiveTab('notes')} icon={<FileText size={13} />} label="notas" />
+              <TabBtn active={activeTab === 'todo'}      onClick={() => setActiveTab('todo')}      icon={<LayoutGrid size={13} />} label="todo" />
+              <TabBtn active={activeTab === 'bookmarks'} onClick={() => setActiveTab('bookmarks')} icon={<Bookmark size={13} />}   label="links" />
+              <TabBtn active={activeTab === 'feed'}      onClick={() => setActiveTab('feed')}      icon={<Rss size={13} />}        label="rss" />
+              <TabBtn active={activeTab === 'notes'}     onClick={() => setActiveTab('notes')}     icon={<FileText size={13} />}   label="notas" />
             </div>
           )}
 
-          {/* Right side: search + import */}
           <div className="ml-auto flex items-center gap-2">
             <GlobalSearch spaces={spaces} onNavigate={handleSearchNavigate} />
             <button
@@ -145,9 +141,9 @@ export default function Home() {
         ) : (
           <div className="flex-1 overflow-hidden flex flex-col">
             {activeTab === 'todo'      && <TodoTab      key={activeSpaceId} spaceId={activeSpaceId!} />}
-            {activeTab === 'bookmarks' && <BookmarksTab key={activeSpaceId} spaceId={activeSpaceId!} allSpaces={null} />}
+            {activeTab === 'bookmarks' && <BookmarksTab key={activeSpaceId} spaceId={activeSpaceId!} allSpaces={spaces} />}
             {activeTab === 'feed'      && <FeedTab      key={activeSpaceId} spaceId={activeSpaceId!} allSpaces={null} />}
-            {activeTab === 'notes'     && <NotesTab     key={activeSpaceId} spaceId={activeSpaceId!} allSpaces={null} />}
+            {activeTab === 'notes'     && <NotesTab     key={activeSpaceId} spaceId={activeSpaceId!} allSpaces={spaces} />}
           </div>
         )}
       </div>
@@ -156,7 +152,7 @@ export default function Home() {
         <ImportModal
           spaces={spaces}
           onClose={() => setShowImport(false)}
-          onImported={(count) => {
+          onImported={() => {
             setShowImport(false)
             setActiveTab('bookmarks')
           }}
