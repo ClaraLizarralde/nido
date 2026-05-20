@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
-import { LayoutGrid, Rss, Bookmark, FileText, Upload, Loader2, Plus, X, Link, StickyNote, Folder } from 'lucide-react'
+import { useState, useEffect, useRef, useMemo } from 'react'
+import { LayoutGrid, Rss, BookmarkIcon, FileText, Upload, Loader2, Plus, Link, StickyNote, FolderPlus } from 'lucide-react'
 import Sidebar from '@/components/Sidebar'
 import BookmarksTab from '@/components/BookmarksTab'
 import NotesTab from '@/components/NotesTab'
@@ -11,8 +11,9 @@ import GlobalSearch from '@/components/GlobalSearch'
 import ImportModal from '@/components/ImportModal'
 import type { Space, TabType } from '@/lib/types'
 import { createClient } from '@/lib/supabase'
+import { getDomain, getFaviconUrl, formatRelativeTime } from '@/lib/utils'
+import type { Bookmark, Note, FeedItem } from '@/lib/types'
 
-// TabType ahora incluye 'inicio'
 type ExtendedTabType = TabType | 'inicio'
 
 export default function Home() {
@@ -23,15 +24,14 @@ export default function Home() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [showImport, setShowImport] = useState(false)
   const [showFAB, setShowFAB] = useState(false)
-  const [bookmarksKey, setBookmarksKey] = useState(0) // para forzar reload
+  const [bookmarksKey, setBookmarksKey] = useState(0)
   const [openAddBookmark, setOpenAddBookmark] = useState(false)
-const [openAddNote, setOpenAddNote] = useState(false)
+  const [openAddNote, setOpenAddNote] = useState(false)
   const fabRef = useRef<HTMLDivElement>(null)
   const supabase = createClient()
 
   useEffect(() => { loadSpaces() }, [])
 
-  // Cerrar FAB al click fuera
   useEffect(() => {
     if (!showFAB) return
     function handleClick(e: MouseEvent) {
@@ -47,7 +47,6 @@ const [openAddNote, setOpenAddNote] = useState(false)
     const { data } = await supabase.from('spaces').select('*').order('order_index')
     if (data && data.length > 0) {
       setSpaces(data)
-      // BUG FIX: empezar en 'inicio' sin seleccionar un espacio específico
       setActiveSpaceId('inicio')
     }
     setLoading(false)
@@ -82,29 +81,26 @@ const [openAddNote, setOpenAddNote] = useState(false)
 
   function handleSelectSpace(id: string | 'inicio') {
     setActiveSpaceId(id)
-    // Si vuelve a inicio no cambia la pestaña; si entra a un espacio va a 'todo'
     if (id !== 'inicio') setActiveTab('todo')
     setSidebarOpen(false)
   }
 
-  // FAB: acciones según el espacio y pestaña activos
-function handleFABAction(action: 'link' | 'note' | 'space') {
-  setShowFAB(false)
-  if (action === 'link') {
-    setOpenAddNote(false)
-    setOpenAddBookmark(true)
-    if (activeSpaceId && activeSpaceId !== 'inicio') setActiveTab('bookmarks')
-  } else if (action === 'note') {
-    setOpenAddBookmark(false)
-    setOpenAddNote(true)
-    if (activeSpaceId && activeSpaceId !== 'inicio') setActiveTab('notes')
-  } else if (action === 'space') {
-    window.dispatchEvent(new CustomEvent('nido:open-add-space'))
+  function handleFABAction(action: 'link' | 'note' | 'space') {
+    setShowFAB(false)
+    if (action === 'link') {
+      setOpenAddNote(false)
+      setOpenAddBookmark(true)
+      if (activeSpaceId && activeSpaceId !== 'inicio') setActiveTab('bookmarks')
+    } else if (action === 'note') {
+      setOpenAddBookmark(false)
+      setOpenAddNote(true)
+      if (activeSpaceId && activeSpaceId !== 'inicio') setActiveTab('notes')
+    } else if (action === 'space') {
+      window.dispatchEvent(new CustomEvent('nido:open-add-space'))
+    }
   }
-}
 
   const activeSpace = spaces.find(s => s.id === activeSpaceId)
-
   const isInicio = activeSpaceId === 'inicio' || !activeSpaceId
 
   if (loading) {
@@ -119,8 +115,8 @@ function handleFABAction(action: 'link' | 'note' | 'space') {
   }
 
   return (
-<div className="h-screen flex bg-bg-base">
-        {sidebarOpen && (
+    <div className="h-screen flex bg-bg-base">
+      {sidebarOpen && (
         <div className="fixed inset-0 z-40 bg-black/60 lg:hidden" onClick={() => setSidebarOpen(false)} />
       )}
 
@@ -157,10 +153,10 @@ function handleFABAction(action: 'link' | 'note' | 'space') {
 
           {activeSpace && (
             <div className="flex gap-1 ml-3">
-              <TabBtn active={activeTab === 'todo'}      onClick={() => setActiveTab('todo')}      icon={<LayoutGrid size={13} />} label="todo" />
-              <TabBtn active={activeTab === 'bookmarks'} onClick={() => setActiveTab('bookmarks')} icon={<Bookmark size={13} />}   label="links" />
-              <TabBtn active={activeTab === 'feed'}      onClick={() => setActiveTab('feed')}      icon={<Rss size={13} />}        label="rss" />
-              <TabBtn active={activeTab === 'notes'}     onClick={() => setActiveTab('notes')}     icon={<FileText size={13} />}   label="notas" />
+              <TabBtn active={activeTab === 'todo'}      onClick={() => setActiveTab('todo')}      icon={<LayoutGrid size={13} />}    label="todo" />
+              <TabBtn active={activeTab === 'bookmarks'} onClick={() => setActiveTab('bookmarks')} icon={<BookmarkIcon size={13} />}  label="links" />
+              <TabBtn active={activeTab === 'feed'}      onClick={() => setActiveTab('feed')}      icon={<LayoutGrid size={13} />}    label="rss" />
+              <TabBtn active={activeTab === 'notes'}     onClick={() => setActiveTab('notes')}     icon={<FileText size={13} />}      label="notas" />
             </div>
           )}
 
@@ -177,28 +173,26 @@ function handleFABAction(action: 'link' | 'note' | 'space') {
           </div>
         </header>
 
-        {/* Contenido principal */}
-<div className="flex-1 flex flex-col min-h-0">
-            {isInicio ? (
-            // BUG FIX: vista inicio muestra TODO de todos los espacios
+        <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+          {isInicio ? (
             <InicioTab spaces={spaces} onNavigate={handleSearchNavigate} />
           ) : (
             <>
-            {activeTab === 'todo'      && <TodoTab      key={activeSpaceId} spaceId={activeSpaceId!} />}
-{activeTab === 'bookmarks' && <BookmarksTab key={`${activeSpaceId}-${bookmarksKey}`} spaceId={activeSpaceId!} allSpaces={spaces} openAddOnMount={openAddBookmark} />}
-{activeTab === 'feed'      && <FeedTab      key={activeSpaceId} spaceId={activeSpaceId!} allSpaces={null} />}
-{activeTab === 'notes'     && <NotesTab     key={activeSpaceId} spaceId={activeSpaceId!} allSpaces={spaces} openAddOnMount={openAddNote} />}
+              {activeTab === 'todo'      && <TodoTab      key={activeSpaceId} spaceId={activeSpaceId!} />}
+              {activeTab === 'bookmarks' && <BookmarksTab key={`${activeSpaceId}-${bookmarksKey}`} spaceId={activeSpaceId!} allSpaces={spaces} openAddOnMount={openAddBookmark} />}
+              {activeTab === 'feed'      && <FeedTab      key={activeSpaceId} spaceId={activeSpaceId!} allSpaces={null} />}
+              {activeTab === 'notes'     && <NotesTab     key={activeSpaceId} spaceId={activeSpaceId!} allSpaces={spaces} openAddOnMount={openAddNote} />}
             </>
           )}
         </div>
       </div>
 
-      {/* FAB - botón nuevo */}
-<div ref={fabRef} style={{position:'fixed', bottom:'24px', right:'24px', zIndex:9999}} className="flex flex-col items-end gap-2">
-          {showFAB && (
+      {/* FAB */}
+      <div ref={fabRef} className="fixed bottom-6 right-6 z-[9999] flex flex-col items-end gap-2">
+        {showFAB && (
           <div className="flex flex-col items-end gap-2 mb-2 animate-slide-up">
             <FABOption
-              icon={<Folder size={15} />}
+              icon={<FolderPlus size={15} />}
               label="nuevo espacio"
               onClick={() => handleFABAction('space')}
             />
@@ -232,12 +226,11 @@ function handleFABAction(action: 'link' | 'note' | 'space') {
         <ImportModal
           spaces={spaces}
           onClose={() => setShowImport(false)}
-          onImported={(count) => {
+          onImported={() => {
             setShowImport(false)
-            // BUG FIX: navegar al espacio y pestaña correcta, y forzar reload
             if (activeSpaceId && activeSpaceId !== 'inicio') {
               setActiveTab('bookmarks')
-              setBookmarksKey(k => k + 1) // fuerza remount de BookmarksTab
+              setBookmarksKey(k => k + 1)
             } else if (spaces.length > 0) {
               setActiveSpaceId(spaces[0].id)
               setActiveTab('bookmarks')
@@ -250,16 +243,9 @@ function handleFABAction(action: 'link' | 'note' | 'space') {
   )
 }
 
-// ─── Inicio Tab: muestra todo de todos los espacios ──────────────────────────
+// ─── InicioTab ────────────────────────────────────────────────────────────────
 
-import { useMemo } from 'react'
-import { getDomain, getFaviconUrl, formatRelativeTime } from '@/lib/utils'
-import type { Bookmark, Note, FeedItem } from '@/lib/types'
-
-function InicioTab({
-  spaces,
-  onNavigate,
-}: {
+function InicioTab({ spaces, onNavigate }: {
   spaces: Space[]
   onNavigate: (spaceId: string, tab: 'bookmarks' | 'notes' | 'feed') => void
 }) {
@@ -299,41 +285,31 @@ function InicioTab({
     return merged.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
   }, [bookmarks, notes, feedItems, spaceMap])
 
-  if (loading) {
-    return (
-      <div className="flex-1 flex justify-center items-center">
-        <Loader2 size={20} className="text-text-muted animate-spin" />
-      </div>
-    )
-  }
+  if (loading) return (
+    <div className="flex-1 flex justify-center items-center">
+      <Loader2 size={20} className="text-text-muted animate-spin" />
+    </div>
+  )
 
-  if (spaces.length === 0) {
-    return (
-      <div className="flex-1 flex items-center justify-center">
-        <div className="text-center max-w-xs">
-          <div className="text-5xl mb-4">🪴</div>
-          <div className="font-serif text-lg text-text-primary mb-2">bienvenida a nido</div>
-          <div className="text-text-muted text-sm leading-relaxed">
-            Tu hogar personal de internet. Creá tu primer espacio desde el panel izquierdo.
-          </div>
-        </div>
+  if (spaces.length === 0) return (
+    <div className="flex-1 flex items-center justify-center">
+      <div className="text-center max-w-xs">
+        <div className="text-5xl mb-4">🪴</div>
+        <div className="font-serif text-lg text-text-primary mb-2">bienvenida a nido</div>
+        <div className="text-text-muted text-sm leading-relaxed">Creá tu primer espacio desde el panel izquierdo.</div>
       </div>
-    )
-  }
+    </div>
+  )
 
-  if (allItems.length === 0) {
-    return (
-      <div className="flex-1 flex items-center justify-center">
-        <div className="text-center max-w-xs">
-          <div className="text-5xl mb-4">🌱</div>
-          <div className="font-serif text-lg text-text-primary mb-2">nido está vacío</div>
-          <div className="text-text-muted text-sm leading-relaxed">
-            Entrá a un espacio y empezá a guardar links, notas o feeds.
-          </div>
-        </div>
+  if (allItems.length === 0) return (
+    <div className="flex-1 flex items-center justify-center">
+      <div className="text-center max-w-xs">
+        <div className="text-5xl mb-4">🌱</div>
+        <div className="font-serif text-lg text-text-primary mb-2">nido está vacío</div>
+        <div className="text-text-muted text-sm leading-relaxed">Entrá a un espacio y empezá a guardar links, notas o feeds.</div>
       </div>
-    )
-  }
+    </div>
+  )
 
   return (
     <div className="flex-1 overflow-y-auto">
@@ -349,25 +325,15 @@ function InicioTab({
             return (
               <div key={`b-${b.id}`} className="flex items-center gap-3 py-2.5 hover:bg-bg-elevated/50 rounded-lg px-1 group transition-colors">
                 <div className="w-6 h-6 rounded-md bg-bg-elevated flex items-center justify-center flex-shrink-0 overflow-hidden">
-                  {favicon
-                    ? <img src={favicon} alt="" className="w-4 h-4" />
-                    : <span className="text-[9px] text-text-muted">🔗</span>
-                  }
+                  {favicon ? <img src={favicon} alt="" className="w-4 h-4" /> : <span className="text-[9px] text-text-muted">🔗</span>}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <a href={b.url} target="_blank" rel="noopener noreferrer"
-                    className="text-sm text-text-primary hover:text-accent font-medium truncate block leading-snug">
-                    {b.title}
-                  </a>
+                  <a href={b.url} target="_blank" rel="noopener noreferrer" className="text-sm text-text-primary hover:text-accent font-medium truncate block leading-snug">{b.title}</a>
                   <span className="text-[10px] text-text-muted truncate">{getDomain(b.url)}</span>
                 </div>
                 {space && (
-                  <button
-                    onClick={() => onNavigate(space.id, 'bookmarks')}
-                    className="flex items-center gap-1 text-[10px] text-text-muted hover:text-accent flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
-                  >
-                    <span>{space.emoji}</span>
-                    <span className="hidden sm:inline">{space.name}</span>
+                  <button onClick={() => onNavigate(space.id, 'bookmarks')} className="flex items-center gap-1 text-[10px] text-text-muted hover:text-accent flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <span>{space.emoji}</span><span className="hidden sm:inline">{space.name}</span>
                   </button>
                 )}
                 <span className="text-[10px] text-text-muted flex-shrink-0">{formatRelativeTime(b.created_at)}</span>
@@ -386,12 +352,8 @@ function InicioTab({
                   {n.content && <p className="text-[10px] text-text-muted truncate">{n.content.replace(/#{1,6}\s|(\*\*|\*)/g, '').slice(0, 80)}</p>}
                 </div>
                 {space && (
-                  <button
-                    onClick={() => onNavigate(space.id, 'notes')}
-                    className="flex items-center gap-1 text-[10px] text-text-muted hover:text-accent flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
-                  >
-                    <span>{space.emoji}</span>
-                    <span className="hidden sm:inline">{space.name}</span>
+                  <button onClick={() => onNavigate(space.id, 'notes')} className="flex items-center gap-1 text-[10px] text-text-muted hover:text-accent flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <span>{space.emoji}</span><span className="hidden sm:inline">{space.name}</span>
                   </button>
                 )}
                 <span className="text-[10px] text-text-muted flex-shrink-0">{formatRelativeTime(n.updated_at)}</span>
@@ -404,25 +366,15 @@ function InicioTab({
             return (
               <div key={`f-${f.id}`} className="flex items-center gap-3 py-2.5 hover:bg-bg-elevated/50 rounded-lg px-1 group transition-colors">
                 <div className="w-6 h-6 rounded-md bg-bg-elevated flex items-center justify-center flex-shrink-0">
-                  {src?.favicon_url
-                    ? <img src={src.favicon_url} alt="" className="w-4 h-4 rounded-sm" />
-                    : <span className="text-[9px] text-rss-dot">●</span>
-                  }
+                  {src?.favicon_url ? <img src={src.favicon_url} alt="" className="w-4 h-4 rounded-sm" /> : <span className="text-[9px] text-rss-dot">●</span>}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <a href={f.url} target="_blank" rel="noopener noreferrer"
-                    className="text-sm text-text-primary hover:text-accent font-medium truncate block leading-snug">
-                    {f.title}
-                  </a>
+                  <a href={f.url} target="_blank" rel="noopener noreferrer" className="text-sm text-text-primary hover:text-accent font-medium truncate block leading-snug">{f.title}</a>
                   <span className="text-[10px] text-text-muted">{src?.name}</span>
                 </div>
                 {space && (
-                  <button
-                    onClick={() => onNavigate(space.id, 'feed')}
-                    className="flex items-center gap-1 text-[10px] text-text-muted hover:text-accent flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
-                  >
-                    <span>{space.emoji}</span>
-                    <span className="hidden sm:inline">{space.name}</span>
+                  <button onClick={() => onNavigate(space.id, 'feed')} className="flex items-center gap-1 text-[10px] text-text-muted hover:text-accent flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <span>{space.emoji}</span><span className="hidden sm:inline">{space.name}</span>
                   </button>
                 )}
                 <span className="text-[10px] text-text-muted flex-shrink-0">{formatRelativeTime(f.published_at || f.created_at)}</span>
@@ -454,10 +406,7 @@ function TabBtn({ active, onClick, icon, label }: {
 }
 
 function FABOption({ icon, label, onClick, disabled }: {
-  icon: React.ReactNode
-  label: string
-  onClick: () => void
-  disabled?: boolean
+  icon: React.ReactNode; label: string; onClick: () => void; disabled?: boolean
 }) {
   return (
     <button
