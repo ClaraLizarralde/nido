@@ -122,9 +122,9 @@ export default function Home() {
           <EmptyHome />
         ) : (
           <div className="flex-1 overflow-hidden flex flex-col">
-            {activeTab === 'feed' && <FeedTab key={activeSpaceId} spaceId={activeSpaceId!} />}
-            {activeTab === 'bookmarks' && <BookmarksTab key={activeSpaceId} spaceId={activeSpaceId!} />}
-            {activeTab === 'notes' && <NotesTab key={activeSpaceId} spaceId={activeSpaceId!} />}
+            {activeTab === 'feed' && <FeedTab key={activeSpaceId} spaceId={activeSpaceId!} allSpaces={null} />}
+{activeTab === 'bookmarks' && <BookmarksTab key={activeSpaceId} spaceId={activeSpaceId!} allSpaces={null} />}
+{activeTab === 'notes' && <NotesTab key={activeSpaceId} spaceId={activeSpaceId!} allSpaces={null} />}
           </div>
         )}
       </div>
