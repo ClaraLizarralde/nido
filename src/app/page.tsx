@@ -1,16 +1,16 @@
-'use client'
+  'use client'
 
-import { useState, useEffect } from 'react'
-import { LayoutGrid, Rss, Bookmark, FileText, Upload, Loader2 } from 'lucide-react'
-import Sidebar from '@/components/Sidebar'
-import BookmarksTab from '@/components/BookmarksTab'
-import NotesTab from '@/components/NotesTab'
-import FeedTab from '@/components/FeedTab'
-import TodoTab from '@/components/TodoTab'
-import GlobalSearch from '@/components/GlobalSearch'
-import ImportModal from '@/components/ImportModal'
-import type { Space, TabType } from '@/lib/types'
-import { createClient } from '@/lib/supabase'
+  import { useState, useEffect } from 'react'
+  import { LayoutGrid, Rss, Bookmark, FileText, Upload, Loader2 } from 'lucide-react'
+  import Sidebar from '@/components/Sidebar'
+  import BookmarksTab from '@/components/BookmarksTab'
+  import NotesTab from '@/components/NotesTab'
+  import FeedTab from '@/components/FeedTab'
+  import TodoTab from '@/components/TodoTab'
+  import GlobalSearch from '@/components/GlobalSearch'
+  import ImportModal from '@/components/ImportModal'
+  import type { Space, TabType } from '@/lib/types'
+  import { createClient } from '@/lib/supabase'
 
 export default function Home() {
   const [spaces, setSpaces] = useState<Space[]>([])

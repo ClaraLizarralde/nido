@@ -198,13 +198,24 @@ export default function Sidebar({ spaces, activeSpaceId, onSelectSpace, onAddSpa
         )}
       </nav>
 
-      <div className="p-3 border-t border-border-subtle">
+<div className="p-3 border-t border-border-subtle space-y-2">
         <button
           onClick={() => setAdding(true)}
           className="w-full flex items-center justify-center gap-2 py-2 bg-bg-elevated hover:bg-bg-overlay border border-border-subtle rounded-lg text-xs text-text-secondary hover:text-text-primary transition-all"
         >
           <Plus size={13} />
           nuevo espacio
+        </button>
+        <button
+          onClick={async () => {
+            const { createClient } = await import('@/lib/supabase')
+            const supabase = createClient()
+            await supabase.auth.signOut()
+            window.location.href = '/login'
+          }}
+          className="w-full flex items-center justify-center gap-2 py-2 hover:bg-bg-elevated rounded-lg text-xs text-text-muted hover:text-text-secondary transition-all"
+        >
+          salir
         </button>
       </div>
     </aside>
