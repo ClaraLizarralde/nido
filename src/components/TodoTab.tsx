@@ -25,7 +25,7 @@ export default function TodoTab({ spaceId }: TodoTabProps) {
   const [notes, setNotes] = useState<Note[]>([])
   const [feedItems, setFeedItems] = useState<FeedItem[]>([])
   const [loading, setLoading] = useState(true)
-  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid')
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>('list')
   const [orderedItems, setOrderedItems] = useState<SpaceItem[]>([])
   const supabase = createClient()
 

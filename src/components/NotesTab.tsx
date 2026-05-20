@@ -1,311 +1,432 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
-import { Plus, X, Loader2, Trash2, Edit3, Check, Eye, Edit, FolderInput } from 'lucide-react'
-import type { Note, Space } from '@/lib/types'
+import { useState, useEffect, useMemo, useCallback } from 'react'
+import { Star, Clock, ExternalLink, Trash2, Loader2, FileText, Rss } from 'lucide-react'
+import type { Bookmark, Note, FeedItem } from '@/lib/types'
 import { createClient } from '@/lib/supabase'
-import { formatRelativeTime } from '@/lib/utils'
-import ReactMarkdown from 'react-markdown'
+import { getDomain, getFaviconUrl, formatRelativeTime } from '@/lib/utils'
+import { DndContext, closestCenter, PointerSensor, KeyboardSensor, useSensor, useSensors, DragEndEvent } from '@dnd-kit/core'
+import { SortableContext, verticalListSortingStrategy, useSortable, arrayMove } from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
+import { restrictToVerticalAxis } from '@dnd-kit/modifiers'
+import { LayoutGrid, List } from 'lucide-react'
 
-interface NotesTabProps {
-  spaceId: string | null
-  allSpaces: Space[] | null
+interface TodoTabProps {
+  spaceId: string
 }
 
-export default function NotesTab({ spaceId, allSpaces }: NotesTabProps) {
+type SpaceItem =
+  | { kind: 'bookmark'; date: string; data: Bookmark }
+  | { kind: 'note';     date: string; data: Note }
+  | { kind: 'feed';     date: string; data: FeedItem }
+
+export default function TodoTab({ spaceId }: TodoTabProps) {
+  const [bookmarks, setBookmarks] = useState<Bookmark[]>([])
   const [notes, setNotes] = useState<Note[]>([])
+  const [feedItems, setFeedItems] = useState<FeedItem[]>([])
   const [loading, setLoading] = useState(true)
-  const [showAdd, setShowAdd] = useState(false)
-  const [editing, setEditing] = useState<string | null>(null)
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>('list')
+  const [orderedItems, setOrderedItems] = useState<SpaceItem[]>([])
   const supabase = createClient()
 
-  useEffect(() => { loadNotes() }, [spaceId])
+  useEffect(() => { loadAll() }, [spaceId])
 
-  async function loadNotes() {
+  async function loadAll() {
     setLoading(true)
-    let query = supabase.from('notes').select('*').order('updated_at', { ascending: false })
-    if (spaceId) query = query.eq('space_id', spaceId)
-    const { data } = await query
-    setNotes(data || [])
+    const [bRes, nRes, fRes] = await Promise.all([
+      supabase.from('bookmarks').select('*').eq('space_id', spaceId).order('created_at', { ascending: false }),
+      supabase.from('notes').select('*').eq('space_id', spaceId).order('updated_at', { ascending: false }),
+      supabase.from('feed_items').select('*, feed_sources(*)').eq('space_id', spaceId).order('published_at', { ascending: false }).limit(30),
+    ])
+    setBookmarks(bRes.data || [])
+    setNotes(nRes.data || [])
+    setFeedItems(fRes.data || [])
     setLoading(false)
   }
 
-  async function addNote(title: string, content: string, tags: string[]) {
-    if (!spaceId) return
-    const { data } = await supabase.from('notes').insert({
-      space_id: spaceId, title, content, tags
-    }).select().single()
-    if (data) setNotes(prev => [data, ...prev])
-    setShowAdd(false)
+  async function toggleFavorite(id: string, current: boolean) {
+    await supabase.from('bookmarks').update({ is_favorite: !current }).eq('id', id)
+    setBookmarks(prev => prev.map(b => b.id === id ? { ...b, is_favorite: !current } : b))
   }
 
-  async function updateNote(id: string, title: string, content: string) {
-    await supabase.from('notes').update({ title, content, updated_at: new Date().toISOString() }).eq('id', id)
-    setNotes(prev => prev.map(n => n.id === id ? { ...n, title, content, updated_at: new Date().toISOString() } : n))
-    setEditing(null)
+  async function toggleReadLater(id: string, current: boolean) {
+    await supabase.from('bookmarks').update({ is_read_later: !current }).eq('id', id)
+    setBookmarks(prev => prev.map(b => b.id === id ? { ...b, is_read_later: !current } : b))
   }
 
-  async function deleteNote(id: string) {
-    await supabase.from('notes').delete().eq('id', id)
-    setNotes(prev => prev.filter(n => n.id !== id))
+  async function deleteBookmark(id: string) {
+    await supabase.from('bookmarks').delete().eq('id', id)
+    setBookmarks(prev => prev.filter(b => b.id !== id))
   }
 
-  async function moveNote(id: string, targetSpaceId: string) {
-    await supabase.from('notes').update({ space_id: targetSpaceId }).eq('id', id)
-    setNotes(prev => prev.filter(n => n.id !== id))
+  const allItems = useMemo((): SpaceItem[] => {
+    const merged: SpaceItem[] = [
+      ...bookmarks.map(b => ({ kind: 'bookmark' as const, date: b.created_at, data: b })),
+      ...notes.map(n    => ({ kind: 'note'     as const, date: n.updated_at,  data: n })),
+      ...feedItems.map(f => ({ kind: 'feed'    as const, date: f.published_at || f.created_at, data: f })),
+    ]
+    return merged.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+  }, [bookmarks, notes, feedItems])
+
+  useEffect(() => { setOrderedItems(allItems) }, [allItems])
+
+  // ✅ Hooks ANTES de los returns condicionales
+  const displayItems = orderedItems.length > 0 ? orderedItems : allItems
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(KeyboardSensor)
+  )
+
+  function handleDragEnd(event: DragEndEvent) {
+    const { active, over } = event
+    if (!over || active.id === over.id) return
+    const oldIndex = displayItems.findIndex(i => `${i.kind}-${i.data.id}` === active.id)
+    const newIndex = displayItems.findIndex(i => `${i.kind}-${i.data.id}` === over.id)
+    setOrderedItems(arrayMove(displayItems, oldIndex, newIndex))
   }
 
-  const otherSpaces = (allSpaces || []).filter(s => s.id !== spaceId)
+  // ✅ Returns condicionales DESPUÉS de los hooks
+  if (loading) {
+    return (
+      <div className="flex-1 flex justify-center items-center">
+        <Loader2 size={20} className="text-text-muted animate-spin" />
+      </div>
+    )
+  }
+
+  if (allItems.length === 0) {
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center text-center py-20">
+        <div className="text-4xl mb-4">🪴</div>
+        <div className="text-text-secondary text-sm mb-1">Este espacio está vacío</div>
+        <div className="text-text-muted text-xs">Agregá links, notas o fuentes RSS desde las otras pestañas</div>
+      </div>
+    )
+  }
 
   return (
     <div className="flex-1 overflow-y-auto">
-      <div className="sticky top-0 z-10 bg-bg-base border-b border-border-subtle px-5 py-3 flex items-center">
-        <span className="text-xs text-text-muted">{notes.length} nota{notes.length !== 1 ? 's' : ''}</span>
-        {spaceId && (
-          <button onClick={() => setShowAdd(true)}
-            className="ml-auto flex items-center gap-1.5 text-xs px-3 py-1.5 bg-accent text-white rounded-lg hover:opacity-90 font-medium">
-            <Plus size={13} /> nueva nota
+
+      {/* ── barra de toggle ── */}
+      <div className="sticky top-0 z-10 bg-bg-base border-b border-border-subtle px-5 py-2 flex items-center justify-between">
+        <span className="text-xs text-text-muted">{allItems.length} items</span>
+        <div className="flex gap-0.5 bg-bg-elevated rounded-lg p-0.5">
+          <button onClick={() => setViewMode('grid')}
+            className={`p-1.5 rounded-md transition-all ${viewMode === 'grid' ? 'bg-bg-surface text-text-primary' : 'text-text-muted hover:text-text-secondary'}`}
+            title="vista cards">
+            <LayoutGrid size={13} />
           </button>
-        )}
+          <button onClick={() => setViewMode('list')}
+            className={`p-1.5 rounded-md transition-all ${viewMode === 'list' ? 'bg-bg-surface text-text-primary' : 'text-text-muted hover:text-text-secondary'}`}
+            title="vista lista">
+            <List size={13} />
+          </button>
+        </div>
       </div>
 
       <div className="p-5">
-        {loading ? (
-          <div className="flex justify-center py-16"><Loader2 size={20} className="text-text-muted animate-spin" /></div>
-        ) : (
-          <div className="columns-1 sm:columns-2 lg:columns-3 gap-3 space-y-3">
-            {showAdd && spaceId && (
-              <div className="break-inside-avoid mb-3">
-                <NoteForm onSave={addNote} onCancel={() => setShowAdd(false)} />
-              </div>
-            )}
-            {notes.length === 0 && !showAdd && <EmptyNotes onAdd={spaceId ? () => setShowAdd(true) : null} />}
-            {notes.map(note => (
-              <div key={note.id} className="break-inside-avoid mb-3">
-                {editing === note.id ? (
-                  <NoteForm
-                    initialTitle={note.title}
-                    initialContent={note.content}
-                    onSave={(title, content) => updateNote(note.id, title, content)}
-                    onCancel={() => setEditing(null)}
-                  />
-                ) : (
-                  <NoteCard
-                    note={note}
-                    otherSpaces={otherSpaces}
-                    onEdit={() => setEditing(note.id)}
-                    onDelete={() => deleteNote(note.id)}
-                    onMove={(targetId) => moveNote(note.id, targetId)}
-                  />
-                )}
-              </div>
-            ))}
+
+        {/* ── vista grid ── */}
+        {viewMode === 'grid' && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {allItems.map(item => {
+              if (item.kind === 'bookmark') return (
+                <BookmarkCard
+                  key={`b-${item.data.id}`}
+                  bookmark={item.data}
+                  onFavorite={() => toggleFavorite(item.data.id, item.data.is_favorite)}
+                  onReadLater={() => toggleReadLater(item.data.id, item.data.is_read_later)}
+                  onDelete={() => deleteBookmark(item.data.id)}
+                />
+              )
+              if (item.kind === 'note') return (
+                <NoteCard key={`n-${item.data.id}`} note={item.data} />
+              )
+              if (item.kind === 'feed') return (
+                <FeedCard key={`f-${item.data.id}`} item={item.data} />
+              )
+            })}
           </div>
         )}
+
+        {/* ── vista lista con drag ── */}
+        {viewMode === 'list' && (
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            modifiers={[restrictToVerticalAxis]}
+            onDragEnd={handleDragEnd}
+          >
+            <SortableContext
+              items={displayItems.map(i => `${i.kind}-${i.data.id}`)}
+              strategy={verticalListSortingStrategy}
+            >
+              <div className="flex flex-col">
+                {displayItems.map(item => (
+                  <SortableRow
+                    key={`${item.kind}-${item.data.id}`}
+                    id={`${item.kind}-${item.data.id}`}
+                    item={item}
+                  />
+                ))}
+              </div>
+            </SortableContext>
+          </DndContext>
+        )}
+
       </div>
     </div>
   )
 }
 
-function NoteCard({ note, otherSpaces, onEdit, onDelete, onMove }: {
-  note: Note
-  otherSpaces: Space[]
-  onEdit: () => void
+// ——— Bookmark card ———
+
+function BookmarkCard({ bookmark: b, onFavorite, onReadLater, onDelete }: {
+  bookmark: Bookmark
+  onFavorite: () => void
+  onReadLater: () => void
   onDelete: () => void
-  onMove: (targetSpaceId: string) => void
 }) {
   const [hovered, setHovered] = useState(false)
-  const [showMove, setShowMove] = useState(false)
-  const moveRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    if (!showMove) return
-    function handleClick(e: MouseEvent) {
-      if (moveRef.current && !moveRef.current.contains(e.target as Node)) {
-        setShowMove(false)
-      }
-    }
-    document.addEventListener('mousedown', handleClick)
-    return () => document.removeEventListener('mousedown', handleClick)
-  }, [showMove])
+  const favicon = getFaviconUrl(b.url)
 
   return (
     <div
       onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => { setHovered(false); setShowMove(false) }}
-      className="relative bg-amber-note-bg border border-amber-note-border rounded-xl p-4 group"
-      style={{ borderLeft: '3px solid rgba(245,166,35,0.4)' }}
+      onMouseLeave={() => setHovered(false)}
+      className={`group relative bg-bg-surface border rounded-xl overflow-hidden transition-all
+        ${b.is_favorite ? 'border-amber-note-border' : 'border-border-subtle hover:border-border-default'}`}
     >
-      <h4 className="font-medium text-sm text-text-primary mb-3 leading-snug">{note.title}</h4>
-
-      <div className="prose-nido text-xs text-text-secondary leading-relaxed">
-        <ReactMarkdown
-          components={{
-            h1: ({ children }) => <h1 className="text-sm font-semibold text-text-primary mt-3 mb-1">{children}</h1>,
-            h2: ({ children }) => <h2 className="text-xs font-semibold text-text-primary mt-2 mb-1">{children}</h2>,
-            h3: ({ children }) => <h3 className="text-xs font-medium text-text-primary mt-2 mb-1">{children}</h3>,
-            p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
-            strong: ({ children }) => <strong className="font-semibold text-text-primary">{children}</strong>,
-            em: ({ children }) => <em className="italic">{children}</em>,
-            ul: ({ children }) => <ul className="list-disc list-inside space-y-0.5 mb-2">{children}</ul>,
-            ol: ({ children }) => <ol className="list-decimal list-inside space-y-0.5 mb-2">{children}</ol>,
-            li: ({ children }) => <li className="text-text-secondary">{children}</li>,
-            code: ({ children }) => <code className="bg-bg-elevated px-1 py-0.5 rounded text-[11px] font-mono text-accent">{children}</code>,
-            blockquote: ({ children }) => <blockquote className="border-l-2 border-amber-note-border pl-3 text-text-muted italic my-2">{children}</blockquote>,
-            hr: () => <hr className="border-border-subtle my-3" />,
-            a: ({ href, children }) => <a href={href} target="_blank" rel="noopener noreferrer" className="text-accent underline underline-offset-2">{children}</a>,
-          }}
-        >
-          {note.content}
-        </ReactMarkdown>
-      </div>
-
-      {note.tags?.length > 0 && (
-        <div className="flex gap-1.5 flex-wrap mt-3">
-          {note.tags.map(tag => (
-            <span key={tag} className="text-[10px] px-1.5 py-0.5 bg-bg-elevated text-text-muted rounded">{tag}</span>
-          ))}
-        </div>
-      )}
-
-      <div className="mt-3 text-[10px] text-text-muted">{formatRelativeTime(note.updated_at)}</div>
-
-      <div className={`absolute top-2 right-2 flex gap-1 transition-opacity ${hovered ? 'opacity-100' : 'opacity-0'}`}>
-        <button onClick={onEdit}
-          className="p-1.5 rounded-md bg-bg-base/80 backdrop-blur border border-border-subtle text-text-muted hover:text-text-primary">
-          <Edit3 size={10} />
-        </button>
-        {otherSpaces.length > 0 && (
-          <div className="relative" ref={moveRef}>
-            <button
-              onClick={() => setShowMove(v => !v)}
-              title="mover a..."
-              className="p-1.5 rounded-md bg-bg-base/80 backdrop-blur border border-border-subtle text-text-muted hover:text-text-primary">
-              <FolderInput size={10} />
-            </button>
-            {showMove && (
-              <div className="absolute top-7 right-0 z-20 bg-bg-surface border border-border-default rounded-xl shadow-lg py-1.5 w-44">
-                <div className="text-[10px] text-text-muted px-3 py-1 border-b border-border-subtle mb-1">mover a...</div>
-                {otherSpaces.map(space => (
-                  <button key={space.id}
-                    onClick={() => { onMove(space.id); setShowMove(false) }}
-                    className="w-full text-left flex items-center gap-2 px-3 py-1.5 text-xs text-text-secondary hover:bg-bg-elevated transition-colors">
-                    <span>{space.emoji}</span>
-                    <span>{space.name}</span>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-        <button onClick={onDelete}
-          className="p-1.5 rounded-md bg-bg-base/80 backdrop-blur border border-border-subtle text-text-muted hover:text-red-400">
-          <Trash2 size={10} />
-        </button>
-      </div>
-    </div>
-  )
-}
-
-function NoteForm({ initialTitle = '', initialContent = '', onSave, onCancel }: {
-  initialTitle?: string
-  initialContent?: string
-  onSave: (title: string, content: string, tags: string[]) => void
-  onCancel: () => void
-}) {
-  const [title, setTitle] = useState(initialTitle)
-  const [content, setContent] = useState(initialContent)
-  const [tags, setTags] = useState('')
-  const [preview, setPreview] = useState(false)
-
-  return (
-    <div className="bg-amber-note-bg border border-amber-note-border rounded-xl p-4 animate-fade-in"
-      style={{ borderLeft: '3px solid rgba(245,166,35,0.5)' }}>
-      <input
-        autoFocus
-        value={title}
-        onChange={e => setTitle(e.target.value)}
-        placeholder="título de la nota..."
-        className="w-full bg-transparent text-sm font-medium text-text-primary placeholder:text-text-muted outline-none mb-3"
-      />
-      <div className="flex gap-1 mb-2">
-        <button onClick={() => setPreview(false)}
-          className={`flex items-center gap-1 text-[10px] px-2 py-1 rounded transition-all
-            ${!preview ? 'bg-bg-elevated text-text-secondary' : 'text-text-muted hover:text-text-secondary'}`}>
-          <Edit size={9} /> escribir
-        </button>
-        <button onClick={() => setPreview(true)}
-          className={`flex items-center gap-1 text-[10px] px-2 py-1 rounded transition-all
-            ${preview ? 'bg-bg-elevated text-text-secondary' : 'text-text-muted hover:text-text-secondary'}`}>
-          <Eye size={9} /> preview
-        </button>
-      </div>
-      {preview ? (
-        <div className="min-h-[96px] text-xs text-text-secondary leading-relaxed">
-          {content ? (
-            <ReactMarkdown
-              components={{
-                h1: ({ children }) => <h1 className="text-sm font-semibold text-text-primary mt-3 mb-1">{children}</h1>,
-                h2: ({ children }) => <h2 className="text-xs font-semibold text-text-primary mt-2 mb-1">{children}</h2>,
-                p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
-                strong: ({ children }) => <strong className="font-semibold text-text-primary">{children}</strong>,
-                em: ({ children }) => <em className="italic">{children}</em>,
-                ul: ({ children }) => <ul className="list-disc list-inside space-y-0.5 mb-2">{children}</ul>,
-                ol: ({ children }) => <ol className="list-decimal list-inside space-y-0.5 mb-2">{children}</ol>,
-                li: ({ children }) => <li>{children}</li>,
-                code: ({ children }) => <code className="bg-bg-elevated px-1 py-0.5 rounded text-[11px] font-mono text-accent">{children}</code>,
-                blockquote: ({ children }) => <blockquote className="border-l-2 border-amber-note-border pl-3 text-text-muted italic my-2">{children}</blockquote>,
-                a: ({ href, children }) => <a href={href} target="_blank" rel="noopener noreferrer" className="text-accent underline underline-offset-2">{children}</a>,
-              }}
-            >
-              {content}
-            </ReactMarkdown>
-          ) : (
-            <span className="text-text-muted italic">nada que previsualizar todavía...</span>
-          )}
+      {b.image_url ? (
+        <div className="h-28 overflow-hidden">
+          <img src={b.image_url} alt="" className="w-full h-full object-cover" />
         </div>
       ) : (
-        <textarea
-          value={content}
-          onChange={e => setContent(e.target.value)}
-          placeholder={`escribí en markdown:\n# título\n**negrita**, *itálica*\n- lista\n> cita`}
-          rows={6}
-          className="w-full bg-transparent text-xs text-text-secondary placeholder:text-text-muted outline-none leading-relaxed font-mono resize-none"
-        />
+        <div className="h-16 bg-bg-elevated flex items-center justify-center">
+          {favicon && <img src={favicon} alt="" className="w-6 h-6 opacity-50" />}
+        </div>
       )}
-      <input
-        value={tags}
-        onChange={e => setTags(e.target.value)}
-        placeholder="tags (coma separados)"
-        className="w-full bg-transparent text-xs text-text-muted placeholder:text-text-muted outline-none mt-2 border-t border-amber-note-border pt-2"
-      />
-      <div className="flex gap-2 mt-3">
-        <button
-          onClick={() => onSave(title, content, tags.split(',').map(t => t.trim()).filter(Boolean))}
-          disabled={!title}
-          className="flex items-center gap-1 text-xs px-3 py-1.5 bg-accent text-white rounded-lg hover:opacity-90 disabled:opacity-40">
-          <Check size={12} /> guardar
-        </button>
-        <button onClick={onCancel} className="text-xs px-3 py-1.5 text-text-muted hover:text-text-secondary rounded-lg">
-          cancelar
-        </button>
+
+      <div className="p-3">
+        <div className="flex items-center gap-1.5 mb-1.5">
+          {favicon && <img src={favicon} alt="" className="w-3.5 h-3.5 rounded-sm" />}
+          <span className="text-[10px] text-text-muted">{getDomain(b.url)}</span>
+        </div>
+        <a href={b.url} target="_blank" rel="noopener noreferrer"
+          className="block text-sm font-medium text-text-primary hover:text-accent leading-snug mb-1.5 line-clamp-2">
+          {b.title}
+        </a>
+        {b.description && (
+          <p className="text-xs text-text-muted line-clamp-2 mb-2 leading-relaxed">{b.description}</p>
+        )}
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {b.tags.slice(0, 3).map(tag => (
+            <span key={tag} className="text-[10px] px-1.5 py-0.5 bg-bg-elevated text-text-muted rounded">{tag}</span>
+          ))}
+          <span className="ml-auto text-[10px] text-text-muted">{formatRelativeTime(b.created_at)}</span>
+        </div>
+      </div>
+
+      <div className={`absolute top-2 right-2 flex gap-1 transition-opacity ${hovered ? 'opacity-100' : 'opacity-0'}`}>
+        <ActionBtn onClick={onFavorite} active={b.is_favorite} title="favorito">
+          <Star size={11} fill={b.is_favorite ? 'currentColor' : 'none'} />
+        </ActionBtn>
+        <ActionBtn onClick={onReadLater} active={b.is_read_later} title="ver después">
+          <Clock size={11} />
+        </ActionBtn>
+        <a href={b.url} target="_blank" rel="noopener noreferrer"
+          className="p-1.5 rounded-md bg-bg-base/80 backdrop-blur text-text-muted hover:text-text-primary border border-border-subtle">
+          <ExternalLink size={11} />
+        </a>
+        <ActionBtn onClick={onDelete} title="eliminar" danger>
+          <Trash2 size={11} />
+        </ActionBtn>
+      </div>
+
+      {b.is_read_later && (
+        <div className="absolute top-2 left-2 text-[9px] px-1.5 py-0.5 bg-bg-base/80 backdrop-blur text-text-secondary rounded border border-border-subtle">
+          ver después
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ——— Note card ———
+
+function NoteCard({ note }: { note: Note }) {
+  const preview = note.content
+    .replace(/#{1,6}\s/g, '')
+    .replace(/\*\*/g, '')
+    .replace(/\n/g, ' ')
+    .trim()
+    .slice(0, 120)
+
+  return (
+    <div className="relative bg-amber-note/10 border border-amber-note-border border-l-2 border-l-amber-note rounded-xl p-3 flex flex-col gap-2">
+      <div className="flex items-center gap-1.5">
+        <FileText size={11} className="text-amber-note flex-shrink-0" />
+        <span className="text-xs font-medium text-text-primary line-clamp-1">{note.title || 'sin título'}</span>
+      </div>
+      {preview && (
+        <p className="text-xs text-text-muted leading-relaxed line-clamp-3">{preview}</p>
+      )}
+      <div className="flex items-center gap-1.5 flex-wrap mt-auto">
+        {note.tags.slice(0, 3).map(tag => (
+          <span key={tag} className="text-[10px] px-1.5 py-0.5 bg-bg-elevated text-text-muted rounded">{tag}</span>
+        ))}
+        <span className="ml-auto text-[10px] text-text-muted">{formatRelativeTime(note.updated_at)}</span>
       </div>
     </div>
   )
 }
 
-function EmptyNotes({ onAdd }: { onAdd: (() => void) | null }) {
+// ——— Feed item card ———
+
+function FeedCard({ item }: { item: FeedItem }) {
+  const sourceName = item.feed_sources?.name ?? 'feed'
+  const favicon = item.feed_sources?.favicon_url
+
   return (
-    <div className="col-span-full flex flex-col items-center justify-center py-20 text-center">
-      <div className="text-4xl mb-4">📝</div>
-      <div className="text-text-secondary text-sm mb-1">Sin notas</div>
-      <div className="text-text-muted text-xs mb-5">Guardá ideas, listas, referencias, mini diarios</div>
-      {onAdd && (
-        <button onClick={onAdd}
-          className="flex items-center gap-2 text-sm px-4 py-2 bg-accent text-white rounded-lg hover:opacity-90">
-          <Plus size={14} /> nueva nota
-        </button>
+    <div className="relative bg-bg-surface border border-border-subtle hover:border-border-default rounded-xl overflow-hidden transition-all">
+      {item.image_url && (
+        <div className="h-24 overflow-hidden">
+          <img src={item.image_url} alt="" className="w-full h-full object-cover" />
+        </div>
       )}
+      <div className="p-3">
+        <div className="flex items-center gap-1.5 mb-1.5">
+          {favicon
+            ? <img src={favicon} alt="" className="w-3.5 h-3.5 rounded-sm" />
+            : <Rss size={11} className="text-text-muted" />
+          }
+          <span className="text-[10px] text-text-muted">{sourceName}</span>
+          {!item.is_read && (
+            <span className="ml-auto w-1.5 h-1.5 rounded-full bg-accent flex-shrink-0" />
+          )}
+        </div>
+        <a href={item.url} target="_blank" rel="noopener noreferrer"
+          className="block text-sm font-medium text-text-primary hover:text-accent leading-snug mb-1.5 line-clamp-2">
+          {item.title}
+        </a>
+        {item.description && (
+          <p className="text-xs text-text-muted line-clamp-2 mb-2 leading-relaxed">{item.description}</p>
+        )}
+        <div className="flex items-center justify-end">
+          <span className="text-[10px] text-text-muted">{formatRelativeTime(item.published_at || item.created_at)}</span>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ——— Shared button ———
+
+function ActionBtn({ children, onClick, active, title, danger }: {
+  children: React.ReactNode
+  onClick: () => void
+  active?: boolean
+  title?: string
+  danger?: boolean
+}) {
+  return (
+    <button onClick={e => { e.preventDefault(); onClick() }} title={title}
+      className={`p-1.5 rounded-md bg-bg-base/80 backdrop-blur border border-border-subtle transition-colors
+        ${danger ? 'text-text-muted hover:text-red-400'
+          : active ? 'text-amber-note' : 'text-text-muted hover:text-text-primary'}`}>
+      {children}
+    </button>
+  )
+}
+
+// ——— Fila arrastrable para la vista lista ———
+
+function SortableRow({ id, item }: { id: string; item: SpaceItem }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id })
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.4 : 1,
+  }
+
+  const kind = item.kind
+
+  const title =
+    kind === 'bookmark' ? item.data.title :
+    kind === 'note'     ? (item.data.title || item.data.content.slice(0, 60)) :
+    item.data.title
+
+  const subtitle =
+    kind === 'bookmark' ? item.data.url :
+    kind === 'note'     ? item.data.content.slice(0, 80) :
+    item.data.feed_sources?.name ?? ''
+
+  const href =
+    kind === 'bookmark' ? item.data.url :
+    kind === 'feed'     ? item.data.url :
+    undefined
+
+  const date = item.date
+
+  const badgeClass =
+    kind === 'bookmark' ? 'bg-blue-500/15 text-blue-300' :
+    kind === 'note'     ? 'bg-amber-500/15 text-amber-300' :
+    'bg-orange-500/15 text-orange-300'
+
+  const badgeLabel =
+    kind === 'bookmark' ? 'link' :
+    kind === 'note'     ? 'nota' :
+    'rss'
+
+  const BadgeIcon =
+    kind === 'bookmark' ? <ExternalLink size={10} /> :
+    kind === 'note'     ? <FileText size={10} /> :
+    <Rss size={10} />
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className="flex items-center gap-3 px-2 py-2.5 rounded-lg hover:bg-bg-elevated transition-colors group"
+    >
+      <button
+        {...attributes}
+        {...listeners}
+        className="text-text-muted/30 hover:text-text-muted cursor-grab active:cursor-grabbing touch-none shrink-0"
+        tabIndex={-1}
+        aria-label="arrastrar"
+      >
+        <svg width="12" height="14" viewBox="0 0 12 14" fill="currentColor">
+          <circle cx="3" cy="2.5" r="1.2"/><circle cx="9" cy="2.5" r="1.2"/>
+          <circle cx="3" cy="7"   r="1.2"/><circle cx="9" cy="7"   r="1.2"/>
+          <circle cx="3" cy="11.5" r="1.2"/><circle cx="9" cy="11.5" r="1.2"/>
+        </svg>
+      </button>
+
+      <span className={`shrink-0 flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium ${badgeClass}`}>
+        {BadgeIcon}
+        {badgeLabel}
+      </span>
+
+      <div className="flex-1 min-w-0">
+        {href ? (
+          <a href={href} target="_blank" rel="noopener noreferrer"
+            className="text-sm text-text-primary hover:text-accent truncate block leading-snug">
+            {title}
+          </a>
+        ) : (
+          <span className="text-sm text-text-primary truncate block leading-snug">{title}</span>
+        )}
+        {subtitle && (
+          <p className="text-xs text-text-muted truncate mt-0.5">{subtitle}</p>
+        )}
+      </div>
+
+      <span className="shrink-0 text-xs text-text-muted whitespace-nowrap">
+        {formatRelativeTime(date)}
+      </span>
     </div>
   )
 }
