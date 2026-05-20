@@ -41,6 +41,17 @@ export default function Home() {
     }
   }
 
+  async function deleteSpace(id: string) {
+  await supabase.from('spaces').delete().eq('id', id)
+  setSpaces(prev => prev.filter(s => s.id !== id))
+  if (activeSpaceId === id) setActiveSpaceId('inicio')
+}
+
+async function renameSpace(id: string, name: string, emoji: string) {
+  await supabase.from('spaces').update({ name, emoji }).eq('id', id)
+  setSpaces(prev => prev.map(s => s.id === id ? { ...s, name, emoji } : s))
+}
+
   function handleSearchNavigate(spaceId: string, tab: 'bookmarks' | 'notes' | 'feed') {
     setActiveSpaceId(spaceId)
     setActiveTab(tab)
@@ -69,12 +80,14 @@ export default function Home() {
         fixed lg:relative z-50 lg:z-auto h-full transition-transform duration-200
         ${sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
       `}>
-        <Sidebar
-          spaces={spaces}
-          activeSpaceId={activeSpaceId}
-          onSelectSpace={(id) => { setActiveSpaceId(id); setSidebarOpen(false) }}
-          onAddSpace={addSpace}
-        />
+   <Sidebar
+  spaces={spaces}
+  activeSpaceId={activeSpaceId}
+  onSelectSpace={(id) => { setActiveSpaceId(id); setSidebarOpen(false) }}
+  onAddSpace={addSpace}
+  onDeleteSpace={deleteSpace}
+  onRenameSpace={renameSpace}
+/>
       </div>
 
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
