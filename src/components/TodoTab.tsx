@@ -25,9 +25,9 @@ export default function TodoTab({ spaceId }: TodoTabProps) {
   const [notes, setNotes] = useState<Note[]>([])
   const [feedItems, setFeedItems] = useState<FeedItem[]>([])
   const [loading, setLoading] = useState(true)
-const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid')
-const [orderedItems, setOrderedItems] = useState<SpaceItem[]>([])
-const supabase = createClient()
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid')
+  const [orderedItems, setOrderedItems] = useState<SpaceItem[]>([])
+  const supabase = createClient()
 
   useEffect(() => { loadAll() }, [spaceId])
 
@@ -67,8 +67,26 @@ const supabase = createClient()
     ]
     return merged.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
   }, [bookmarks, notes, feedItems])
+
   useEffect(() => { setOrderedItems(allItems) }, [allItems])
 
+  // ✅ Hooks ANTES de los returns condicionales
+  const displayItems = orderedItems.length > 0 ? orderedItems : allItems
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(KeyboardSensor)
+  )
+
+  function handleDragEnd(event: DragEndEvent) {
+    const { active, over } = event
+    if (!over || active.id === over.id) return
+    const oldIndex = displayItems.findIndex(i => `${i.kind}-${i.data.id}` === active.id)
+    const newIndex = displayItems.findIndex(i => `${i.kind}-${i.data.id}` === over.id)
+    setOrderedItems(arrayMove(displayItems, oldIndex, newIndex))
+  }
+
+  // ✅ Returns condicionales DESPUÉS de los hooks
   if (loading) {
     return (
       <div className="flex-1 flex justify-center items-center">
@@ -85,21 +103,6 @@ const supabase = createClient()
         <div className="text-text-muted text-xs">Agregá links, notas o fuentes RSS desde las otras pestañas</div>
       </div>
     )
-  }
-
-const displayItems = orderedItems.length > 0 ? orderedItems : allItems
-
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
-    useSensor(KeyboardSensor)
-  )
-
-  function handleDragEnd(event: DragEndEvent) {
-    const { active, over } = event
-    if (!over || active.id === over.id) return
-    const oldIndex = displayItems.findIndex(i => `${i.kind}-${i.data.id}` === active.id)
-    const newIndex = displayItems.findIndex(i => `${i.kind}-${i.data.id}` === over.id)
-    setOrderedItems(arrayMove(displayItems, oldIndex, newIndex))
   }
 
   return (
@@ -124,7 +127,7 @@ const displayItems = orderedItems.length > 0 ? orderedItems : allItems
 
       <div className="p-5">
 
-        {/* ── vista grid (igual que antes) ── */}
+        {/* ── vista grid ── */}
         {viewMode === 'grid' && (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {allItems.map(item => {
@@ -254,8 +257,8 @@ function BookmarkCard({ bookmark: b, onFavorite, onReadLater, onDelete }: {
 
 function NoteCard({ note }: { note: Note }) {
   const preview = note.content
-    .replace(/#{1,6}\s/g, '')   // saca los # de markdown
-    .replace(/\*\*/g, '')        // saca negritas
+    .replace(/#{1,6}\s/g, '')
+    .replace(/\*\*/g, '')
     .replace(/\n/g, ' ')
     .trim()
     .slice(0, 120)
@@ -350,7 +353,6 @@ function SortableRow({ id, item }: { id: string; item: SpaceItem }) {
 
   const kind = item.kind
 
-  // Título y subtítulo según el tipo
   const title =
     kind === 'bookmark' ? item.data.title :
     kind === 'note'     ? (item.data.title || item.data.content.slice(0, 60)) :
@@ -389,7 +391,6 @@ function SortableRow({ id, item }: { id: string; item: SpaceItem }) {
       style={style}
       className="flex items-center gap-3 px-2 py-2.5 rounded-lg hover:bg-bg-elevated transition-colors group"
     >
-      {/* drag handle — los 6 puntitos */}
       <button
         {...attributes}
         {...listeners}
@@ -404,13 +405,11 @@ function SortableRow({ id, item }: { id: string; item: SpaceItem }) {
         </svg>
       </button>
 
-      {/* badge tipo */}
       <span className={`shrink-0 flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium ${badgeClass}`}>
         {BadgeIcon}
         {badgeLabel}
       </span>
 
-      {/* contenido */}
       <div className="flex-1 min-w-0">
         {href ? (
           <a href={href} target="_blank" rel="noopener noreferrer"
@@ -425,12 +424,9 @@ function SortableRow({ id, item }: { id: string; item: SpaceItem }) {
         )}
       </div>
 
-      {/* fecha */}
       <span className="shrink-0 text-xs text-text-muted whitespace-nowrap">
         {formatRelativeTime(date)}
       </span>
     </div>
   )
 }
-
-
