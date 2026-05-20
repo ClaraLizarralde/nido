@@ -1,10 +1,15 @@
 'use client'
 
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
 import { Star, Clock, ExternalLink, Trash2, Loader2, FileText, Rss } from 'lucide-react'
 import type { Bookmark, Note, FeedItem } from '@/lib/types'
 import { createClient } from '@/lib/supabase'
 import { getDomain, getFaviconUrl, formatRelativeTime } from '@/lib/utils'
+import { DndContext, closestCenter, PointerSensor, KeyboardSensor, useSensor, useSensors, DragEndEvent } from '@dnd-kit/core'
+import { SortableContext, verticalListSortingStrategy, useSortable, arrayMove } from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
+import { restrictToVerticalAxis } from '@dnd-kit/modifiers'
+import { LayoutGrid, List } from 'lucide-react'
 
 interface TodoTabProps {
   spaceId: string
@@ -20,7 +25,9 @@ export default function TodoTab({ spaceId }: TodoTabProps) {
   const [notes, setNotes] = useState<Note[]>([])
   const [feedItems, setFeedItems] = useState<FeedItem[]>([])
   const [loading, setLoading] = useState(true)
-  const supabase = createClient()
+const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid')
+const [orderedItems, setOrderedItems] = useState<SpaceItem[]>([])
+const supabase = createClient()
 
   useEffect(() => { loadAll() }, [spaceId])
 
@@ -60,6 +67,7 @@ export default function TodoTab({ spaceId }: TodoTabProps) {
     ]
     return merged.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
   }, [bookmarks, notes, feedItems])
+  useEffect(() => { setOrderedItems(allItems) }, [allItems])
 
   if (loading) {
     return (
@@ -79,26 +87,91 @@ export default function TodoTab({ spaceId }: TodoTabProps) {
     )
   }
 
+const displayItems = orderedItems.length > 0 ? orderedItems : allItems
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(KeyboardSensor)
+  )
+
+  function handleDragEnd(event: DragEndEvent) {
+    const { active, over } = event
+    if (!over || active.id === over.id) return
+    const oldIndex = displayItems.findIndex(i => `${i.kind}-${i.data.id}` === active.id)
+    const newIndex = displayItems.findIndex(i => `${i.kind}-${i.data.id}` === over.id)
+    setOrderedItems(arrayMove(displayItems, oldIndex, newIndex))
+  }
+
   return (
-    <div className="flex-1 overflow-y-auto p-5">
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-        {allItems.map(item => {
-          if (item.kind === 'bookmark') return (
-            <BookmarkCard
-              key={`b-${item.data.id}`}
-              bookmark={item.data}
-              onFavorite={() => toggleFavorite(item.data.id, item.data.is_favorite)}
-              onReadLater={() => toggleReadLater(item.data.id, item.data.is_read_later)}
-              onDelete={() => deleteBookmark(item.data.id)}
-            />
-          )
-          if (item.kind === 'note') return (
-            <NoteCard key={`n-${item.data.id}`} note={item.data} />
-          )
-          if (item.kind === 'feed') return (
-            <FeedCard key={`f-${item.data.id}`} item={item.data} />
-          )
-        })}
+    <div className="flex-1 overflow-y-auto">
+
+      {/* ── barra de toggle ── */}
+      <div className="sticky top-0 z-10 bg-bg-base border-b border-border-subtle px-5 py-2 flex items-center justify-between">
+        <span className="text-xs text-text-muted">{allItems.length} items</span>
+        <div className="flex gap-0.5 bg-bg-elevated rounded-lg p-0.5">
+          <button onClick={() => setViewMode('grid')}
+            className={`p-1.5 rounded-md transition-all ${viewMode === 'grid' ? 'bg-bg-surface text-text-primary' : 'text-text-muted hover:text-text-secondary'}`}
+            title="vista cards">
+            <LayoutGrid size={13} />
+          </button>
+          <button onClick={() => setViewMode('list')}
+            className={`p-1.5 rounded-md transition-all ${viewMode === 'list' ? 'bg-bg-surface text-text-primary' : 'text-text-muted hover:text-text-secondary'}`}
+            title="vista lista">
+            <List size={13} />
+          </button>
+        </div>
+      </div>
+
+      <div className="p-5">
+
+        {/* ── vista grid (igual que antes) ── */}
+        {viewMode === 'grid' && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {allItems.map(item => {
+              if (item.kind === 'bookmark') return (
+                <BookmarkCard
+                  key={`b-${item.data.id}`}
+                  bookmark={item.data}
+                  onFavorite={() => toggleFavorite(item.data.id, item.data.is_favorite)}
+                  onReadLater={() => toggleReadLater(item.data.id, item.data.is_read_later)}
+                  onDelete={() => deleteBookmark(item.data.id)}
+                />
+              )
+              if (item.kind === 'note') return (
+                <NoteCard key={`n-${item.data.id}`} note={item.data} />
+              )
+              if (item.kind === 'feed') return (
+                <FeedCard key={`f-${item.data.id}`} item={item.data} />
+              )
+            })}
+          </div>
+        )}
+
+        {/* ── vista lista con drag ── */}
+        {viewMode === 'list' && (
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            modifiers={[restrictToVerticalAxis]}
+            onDragEnd={handleDragEnd}
+          >
+            <SortableContext
+              items={displayItems.map(i => `${i.kind}-${i.data.id}`)}
+              strategy={verticalListSortingStrategy}
+            >
+              <div className="flex flex-col">
+                {displayItems.map(item => (
+                  <SortableRow
+                    key={`${item.kind}-${item.data.id}`}
+                    id={`${item.kind}-${item.data.id}`}
+                    item={item}
+                  />
+                ))}
+              </div>
+            </SortableContext>
+          </DndContext>
+        )}
+
       </div>
     </div>
   )
@@ -264,5 +337,100 @@ function ActionBtn({ children, onClick, active, title, danger }: {
   )
 }
 
+// ——— Fila arrastrable para la vista lista ———
+
+function SortableRow({ id, item }: { id: string; item: SpaceItem }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id })
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.4 : 1,
+  }
+
+  const kind = item.kind
+
+  // Título y subtítulo según el tipo
+  const title =
+    kind === 'bookmark' ? item.data.title :
+    kind === 'note'     ? (item.data.title || item.data.content.slice(0, 60)) :
+    item.data.title
+
+  const subtitle =
+    kind === 'bookmark' ? item.data.url :
+    kind === 'note'     ? item.data.content.slice(0, 80) :
+    item.data.feed_sources?.name ?? ''
+
+  const href =
+    kind === 'bookmark' ? item.data.url :
+    kind === 'feed'     ? item.data.url :
+    undefined
+
+  const date = item.date
+
+  const badgeClass =
+    kind === 'bookmark' ? 'bg-blue-500/15 text-blue-300' :
+    kind === 'note'     ? 'bg-amber-500/15 text-amber-300' :
+    'bg-orange-500/15 text-orange-300'
+
+  const badgeLabel =
+    kind === 'bookmark' ? 'link' :
+    kind === 'note'     ? 'nota' :
+    'rss'
+
+  const BadgeIcon =
+    kind === 'bookmark' ? <ExternalLink size={10} /> :
+    kind === 'note'     ? <FileText size={10} /> :
+    <Rss size={10} />
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className="flex items-center gap-3 px-2 py-2.5 rounded-lg hover:bg-bg-elevated transition-colors group"
+    >
+      {/* drag handle — los 6 puntitos */}
+      <button
+        {...attributes}
+        {...listeners}
+        className="text-text-muted/30 hover:text-text-muted cursor-grab active:cursor-grabbing touch-none shrink-0"
+        tabIndex={-1}
+        aria-label="arrastrar"
+      >
+        <svg width="12" height="14" viewBox="0 0 12 14" fill="currentColor">
+          <circle cx="3" cy="2.5" r="1.2"/><circle cx="9" cy="2.5" r="1.2"/>
+          <circle cx="3" cy="7"   r="1.2"/><circle cx="9" cy="7"   r="1.2"/>
+          <circle cx="3" cy="11.5" r="1.2"/><circle cx="9" cy="11.5" r="1.2"/>
+        </svg>
+      </button>
+
+      {/* badge tipo */}
+      <span className={`shrink-0 flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium ${badgeClass}`}>
+        {BadgeIcon}
+        {badgeLabel}
+      </span>
+
+      {/* contenido */}
+      <div className="flex-1 min-w-0">
+        {href ? (
+          <a href={href} target="_blank" rel="noopener noreferrer"
+            className="text-sm text-text-primary hover:text-accent truncate block leading-snug">
+            {title}
+          </a>
+        ) : (
+          <span className="text-sm text-text-primary truncate block leading-snug">{title}</span>
+        )}
+        {subtitle && (
+          <p className="text-xs text-text-muted truncate mt-0.5">{subtitle}</p>
+        )}
+      </div>
+
+      {/* fecha */}
+      <span className="shrink-0 text-xs text-text-muted whitespace-nowrap">
+        {formatRelativeTime(date)}
+      </span>
+    </div>
+  )
+}
 
 
