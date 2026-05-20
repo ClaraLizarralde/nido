@@ -1,11 +1,12 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Rss, Bookmark, FileText, Upload, Loader2 } from 'lucide-react'
+import { LayoutGrid, Rss, Bookmark, FileText, Upload, Loader2 } from 'lucide-react'
 import Sidebar from '@/components/Sidebar'
 import BookmarksTab from '@/components/BookmarksTab'
 import NotesTab from '@/components/NotesTab'
 import FeedTab from '@/components/FeedTab'
+import TodoTab from '@/components/TodoTab'
 import GlobalSearch from '@/components/GlobalSearch'
 import ImportModal from '@/components/ImportModal'
 import type { Space, TabType } from '@/lib/types'
@@ -14,7 +15,7 @@ import { createClient } from '@/lib/supabase'
 export default function Home() {
   const [spaces, setSpaces] = useState<Space[]>([])
   const [activeSpaceId, setActiveSpaceId] = useState<string | null>(null)
-  const [activeTab, setActiveTab] = useState<TabType>('feed')
+  const [activeTab, setActiveTab] = useState<TabType>('todo')
   const [loading, setLoading] = useState(true)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [showImport, setShowImport] = useState(false)
@@ -42,19 +43,26 @@ export default function Home() {
   }
 
   async function deleteSpace(id: string) {
-  await supabase.from('spaces').delete().eq('id', id)
-  setSpaces(prev => prev.filter(s => s.id !== id))
-  if (activeSpaceId === id) setActiveSpaceId('inicio')
-}
+    await supabase.from('spaces').delete().eq('id', id)
+    setSpaces(prev => prev.filter(s => s.id !== id))
+    if (activeSpaceId === id) setActiveSpaceId('inicio')
+  }
 
-async function renameSpace(id: string, name: string, emoji: string) {
-  await supabase.from('spaces').update({ name, emoji }).eq('id', id)
-  setSpaces(prev => prev.map(s => s.id === id ? { ...s, name, emoji } : s))
-}
+  async function renameSpace(id: string, name: string, emoji: string) {
+    await supabase.from('spaces').update({ name, emoji }).eq('id', id)
+    setSpaces(prev => prev.map(s => s.id === id ? { ...s, name, emoji } : s))
+  }
 
   function handleSearchNavigate(spaceId: string, tab: 'bookmarks' | 'notes' | 'feed') {
     setActiveSpaceId(spaceId)
     setActiveTab(tab)
+  }
+
+  // Al cambiar de espacio, volver siempre a "todo"
+  function handleSelectSpace(id: string) {
+    setActiveSpaceId(id)
+    setActiveTab('todo')
+    setSidebarOpen(false)
   }
 
   const activeSpace = spaces.find(s => s.id === activeSpaceId)
@@ -80,14 +88,14 @@ async function renameSpace(id: string, name: string, emoji: string) {
         fixed lg:relative z-50 lg:z-auto h-full transition-transform duration-200
         ${sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
       `}>
-   <Sidebar
-  spaces={spaces}
-  activeSpaceId={activeSpaceId}
-  onSelectSpace={(id) => { setActiveSpaceId(id); setSidebarOpen(false) }}
-  onAddSpace={addSpace}
-  onDeleteSpace={deleteSpace}
-  onRenameSpace={renameSpace}
-/>
+        <Sidebar
+          spaces={spaces}
+          activeSpaceId={activeSpaceId}
+          onSelectSpace={handleSelectSpace}
+          onAddSpace={addSpace}
+          onDeleteSpace={deleteSpace}
+          onRenameSpace={renameSpace}
+        />
       </div>
 
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
@@ -111,8 +119,9 @@ async function renameSpace(id: string, name: string, emoji: string) {
           {/* Tabs */}
           {activeSpace && (
             <div className="flex gap-1 ml-3">
-              <TabBtn active={activeTab === 'feed'} onClick={() => setActiveTab('feed')} icon={<Rss size={13} />} label="novedades" />
-              <TabBtn active={activeTab === 'bookmarks'} onClick={() => setActiveTab('bookmarks')} icon={<Bookmark size={13} />} label="guardados" />
+              <TabBtn active={activeTab === 'todo'} onClick={() => setActiveTab('todo')} icon={<LayoutGrid size={13} />} label="todo" />
+              <TabBtn active={activeTab === 'bookmarks'} onClick={() => setActiveTab('bookmarks')} icon={<Bookmark size={13} />} label="links" />
+              <TabBtn active={activeTab === 'feed'} onClick={() => setActiveTab('feed')} icon={<Rss size={13} />} label="rss" />
               <TabBtn active={activeTab === 'notes'} onClick={() => setActiveTab('notes')} icon={<FileText size={13} />} label="notas" />
             </div>
           )}
@@ -135,9 +144,10 @@ async function renameSpace(id: string, name: string, emoji: string) {
           <EmptyHome />
         ) : (
           <div className="flex-1 overflow-hidden flex flex-col">
-            {activeTab === 'feed' && <FeedTab key={activeSpaceId} spaceId={activeSpaceId!} allSpaces={null} />}
-{activeTab === 'bookmarks' && <BookmarksTab key={activeSpaceId} spaceId={activeSpaceId!} allSpaces={null} />}
-{activeTab === 'notes' && <NotesTab key={activeSpaceId} spaceId={activeSpaceId!} allSpaces={null} />}
+            {activeTab === 'todo'      && <TodoTab      key={activeSpaceId} spaceId={activeSpaceId!} />}
+            {activeTab === 'bookmarks' && <BookmarksTab key={activeSpaceId} spaceId={activeSpaceId!} allSpaces={null} />}
+            {activeTab === 'feed'      && <FeedTab      key={activeSpaceId} spaceId={activeSpaceId!} allSpaces={null} />}
+            {activeTab === 'notes'     && <NotesTab     key={activeSpaceId} spaceId={activeSpaceId!} allSpaces={null} />}
           </div>
         )}
       </div>

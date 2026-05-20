@@ -55,4 +55,4 @@ export interface FeedItem {
   feed_sources?: FeedSource
 }
 
-export type TabType = 'feed' | 'bookmarks' | 'notes'
+export type TabType = 'todo' | 'feed' | 'bookmarks' | 'notes'
