@@ -2,6 +2,23 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { Plus, Star, Clock, Tag, X, ExternalLink, Loader2, Trash2, FolderInput, LayoutGrid, List } from 'lucide-react'
+import {
+  DndContext,
+  closestCenter,
+  PointerSensor,
+  KeyboardSensor,
+  useSensor,
+  useSensors,
+  DragEndEvent,
+} from '@dnd-kit/core'
+import {
+  SortableContext,
+  verticalListSortingStrategy,
+  useSortable,
+  arrayMove,
+} from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
+import { restrictToVerticalAxis } from '@dnd-kit/modifiers'
 import type { Bookmark, Space } from '@/lib/types'
 import { createClient } from '@/lib/supabase'
 import { fetchUrlMetadata, getDomain, getFaviconUrl, formatRelativeTime } from '@/lib/utils'
@@ -9,10 +26,12 @@ import { fetchUrlMetadata, getDomain, getFaviconUrl, formatRelativeTime } from '
 interface BookmarksTabProps {
   spaceId: string | null
   allSpaces: Space[] | null
+  openAddOnMount?: boolean
 }
 
-export default function BookmarksTab({ spaceId, allSpaces }: BookmarksTabProps) {
+export default function BookmarksTab({ spaceId, allSpaces, openAddOnMount }: BookmarksTabProps) {
   const [bookmarks, setBookmarks] = useState<Bookmark[]>([])
+  const [orderedBookmarks, setOrderedBookmarks] = useState<Bookmark[]>([])
   const [loading, setLoading] = useState(true)
   const [showAdd, setShowAdd] = useState(false)
   const [filter, setFilter] = useState<'all' | 'favorites' | 'read-later'>('all')
@@ -20,11 +39,24 @@ export default function BookmarksTab({ spaceId, allSpaces }: BookmarksTabProps) 
   const [viewMode, setViewMode] = useState<'card' | 'list'>('list')
   const supabase = createClient()
 
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(KeyboardSensor)
+  )
+
   useEffect(() => { loadBookmarks() }, [spaceId])
+
+  // BUG FIX: escuchar el evento del FAB para abrir el modal de agregar
+ useEffect(() => {
+  if (openAddOnMount) setShowAdd(true)
+}, [openAddOnMount])
+
+  // Sincronizar orderedBookmarks cuando cambian los bookmarks
+  useEffect(() => { setOrderedBookmarks(bookmarks) }, [bookmarks])
 
   async function loadBookmarks() {
     setLoading(true)
-    let query = supabase.from('bookmarks').select('*').order('created_at', { ascending: false })
+    let query = supabase.from('bookmarks').select('*').order('order_index', { ascending: true, nullsFirst: false })
     if (spaceId) query = query.eq('space_id', spaceId)
     const { data } = await query
     setBookmarks(data || [])
@@ -51,7 +83,26 @@ export default function BookmarksTab({ spaceId, allSpaces }: BookmarksTabProps) 
     setBookmarks(prev => prev.filter(b => b.id !== id))
   }
 
-  const filtered = bookmarks.filter(b => {
+  // BUG FIX: drag & drop para la vista lista
+  async function handleDragEnd(event: DragEndEvent) {
+  const { active, over } = event
+  if (!over || active.id === over.id) return
+  const oldIndex = orderedBookmarks.findIndex(b => b.id === active.id)
+  const newIndex = orderedBookmarks.findIndex(b => b.id === over.id)
+  const reordered = arrayMove(orderedBookmarks, oldIndex, newIndex)
+  setOrderedBookmarks(reordered)
+
+  // Persistir en Supabase
+  await Promise.all(
+    reordered.map((b, index) =>
+      supabase.from('bookmarks').update({ order_index: index }).eq('id', b.id)
+    )
+  )
+}
+
+  const displayBookmarks = orderedBookmarks.length > 0 ? orderedBookmarks : bookmarks
+
+  const filtered = displayBookmarks.filter(b => {
     if (filter === 'favorites' && !b.is_favorite) return false
     if (filter === 'read-later' && !b.is_read_later) return false
     if (searchTag && !b.tags.some(t => t.toLowerCase().includes(searchTag.toLowerCase()))) return false
@@ -126,19 +177,29 @@ export default function BookmarksTab({ spaceId, allSpaces }: BookmarksTabProps) 
             ))}
           </div>
         ) : (
-          <div className="flex flex-col divide-y divide-border-subtle">
-            {filtered.map(b => (
-              <BookmarkRow
-                key={b.id}
-                bookmark={b}
-                otherSpaces={otherSpaces}
-                onFavorite={() => toggleFavorite(b.id, b.is_favorite)}
-                onReadLater={() => toggleReadLater(b.id, b.is_read_later)}
-                onDelete={() => deleteBookmark(b.id)}
-                onMove={(targetId) => moveBookmark(b.id, targetId)}
-              />
-            ))}
-          </div>
+          // BUG FIX: vista lista con drag & drop (igual que NotesTab)
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            modifiers={[restrictToVerticalAxis]}
+            onDragEnd={handleDragEnd}
+          >
+            <SortableContext items={filtered.map(b => b.id)} strategy={verticalListSortingStrategy}>
+              <div className="flex flex-col divide-y divide-border-subtle">
+                {filtered.map(b => (
+                  <SortableBookmarkRow
+                    key={b.id}
+                    bookmark={b}
+                    otherSpaces={otherSpaces}
+                    onFavorite={() => toggleFavorite(b.id, b.is_favorite)}
+                    onReadLater={() => toggleReadLater(b.id, b.is_read_later)}
+                    onDelete={() => deleteBookmark(b.id)}
+                    onMove={(targetId) => moveBookmark(b.id, targetId)}
+                  />
+                ))}
+              </div>
+            </SortableContext>
+          </DndContext>
         )}
       </div>
 
@@ -153,9 +214,9 @@ export default function BookmarksTab({ spaceId, allSpaces }: BookmarksTabProps) 
   )
 }
 
-// ─── Modo lista ──────────────────────────────────────────────────────────────
+// ─── Fila sortable (BUG FIX: drag & drop para links) ─────────────────────────
 
-function BookmarkRow({ bookmark: b, otherSpaces, onFavorite, onReadLater, onDelete, onMove }: {
+function SortableBookmarkRow({ bookmark: b, otherSpaces, onFavorite, onReadLater, onDelete, onMove }: {
   bookmark: Bookmark
   otherSpaces: Space[]
   onFavorite: () => void
@@ -163,10 +224,17 @@ function BookmarkRow({ bookmark: b, otherSpaces, onFavorite, onReadLater, onDele
   onDelete: () => void
   onMove: (targetSpaceId: string) => void
 }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: b.id })
   const [hovered, setHovered] = useState(false)
   const [showMove, setShowMove] = useState(false)
   const moveRef = useRef<HTMLDivElement>(null)
   const favicon = getFaviconUrl(b.url)
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.4 : 1,
+  }
 
   useEffect(() => {
     if (!showMove) return
@@ -181,11 +249,28 @@ function BookmarkRow({ bookmark: b, otherSpaces, onFavorite, onReadLater, onDele
 
   return (
     <div
+      ref={setNodeRef}
+      style={style}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => { setHovered(false); setShowMove(false) }}
       className={`group flex items-center gap-3 py-2.5 px-1 transition-colors
         ${b.is_favorite ? 'bg-amber-note-border/10' : 'hover:bg-bg-elevated/50'}`}
     >
+      {/* Drag handle */}
+      <button
+        {...attributes}
+        {...listeners}
+        className="text-text-muted/30 hover:text-text-muted cursor-grab active:cursor-grabbing touch-none shrink-0"
+        tabIndex={-1}
+        aria-label="arrastrar"
+      >
+        <svg width="12" height="14" viewBox="0 0 12 14" fill="currentColor">
+          <circle cx="3" cy="2.5" r="1.2"/><circle cx="9" cy="2.5" r="1.2"/>
+          <circle cx="3" cy="7"   r="1.2"/><circle cx="9" cy="7"   r="1.2"/>
+          <circle cx="3" cy="11.5" r="1.2"/><circle cx="9" cy="11.5" r="1.2"/>
+        </svg>
+      </button>
+
       {/* favicon */}
       <div className="w-7 h-7 rounded-md bg-bg-elevated flex items-center justify-center flex-shrink-0 overflow-hidden">
         {favicon
@@ -254,7 +339,7 @@ function BookmarkRow({ bookmark: b, otherSpaces, onFavorite, onReadLater, onDele
   )
 }
 
-// ─── Modo card (sin cambios) ──────────────────────────────────────────────────
+// ─── Modo card ────────────────────────────────────────────────────────────────
 
 function BookmarkCard({ bookmark: b, otherSpaces, onFavorite, onReadLater, onDelete, onMove }: {
   bookmark: Bookmark
@@ -362,6 +447,26 @@ function BookmarkCard({ bookmark: b, otherSpaces, onFavorite, onReadLater, onDel
   )
 }
 
+// ─── Empty state ──────────────────────────────────────────────────────────────
+
+function EmptyState({ onAdd }: { onAdd: (() => void) | null }) {
+  return (
+    <div className="flex flex-col items-center justify-center py-20 text-center">
+      <div className="text-4xl mb-4">🔗</div>
+      <div className="text-text-secondary text-sm mb-1">Sin links guardados</div>
+      <div className="text-text-muted text-xs mb-5">Guardá artículos, herramientas, referencias</div>
+      {onAdd && (
+        <button onClick={onAdd}
+          className="flex items-center gap-2 text-sm px-4 py-2 bg-accent text-white rounded-lg hover:opacity-90">
+          <Plus size={14} /> agregar primer link
+        </button>
+      )}
+    </div>
+  )
+}
+
+// ─── Shared ActionBtn ─────────────────────────────────────────────────────────
+
 function ActionBtn({ children, onClick, active, title, danger }: {
   children: React.ReactNode
   onClick: () => void
@@ -379,21 +484,7 @@ function ActionBtn({ children, onClick, active, title, danger }: {
   )
 }
 
-function EmptyState({ onAdd }: { onAdd: (() => void) | null }) {
-  return (
-    <div className="flex flex-col items-center justify-center py-20 text-center">
-      <div className="text-4xl mb-4">🔖</div>
-      <div className="text-text-secondary text-sm mb-1">Sin links guardados</div>
-      <div className="text-text-muted text-xs mb-5">Guardá links de lo que encontrás por internet</div>
-      {onAdd && (
-        <button onClick={onAdd}
-          className="flex items-center gap-2 text-sm px-4 py-2 bg-accent text-white rounded-lg hover:opacity-90">
-          <Plus size={14} /> agregar primer link
-        </button>
-      )}
-    </div>
-  )
-}
+// ─── Add Bookmark Modal ───────────────────────────────────────────────────────
 
 function AddBookmarkModal({ spaceId, onClose, onAdded }: {
   spaceId: string
@@ -403,78 +494,104 @@ function AddBookmarkModal({ spaceId, onClose, onAdded }: {
   const [url, setUrl] = useState('')
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
-  const [image, setImage] = useState('')
   const [tags, setTags] = useState('')
-  const [loading, setLoading] = useState(false)
-  const [fetching, setFetching] = useState(false)
+  const [isFavorite, setIsFavorite] = useState(false)
+  const [isReadLater, setIsReadLater] = useState(false)
+  const [loadingMeta, setLoadingMeta] = useState(false)
+  const [saving, setSaving] = useState(false)
   const supabase = createClient()
 
   async function handleUrlBlur() {
-    if (!url) return
-    setFetching(true)
+    if (!url || !url.startsWith('http')) return
+    setLoadingMeta(true)
     const meta = await fetchUrlMetadata(url)
     if (meta) {
       if (meta.title) setTitle(meta.title)
       if (meta.description) setDescription(meta.description)
-      if (meta.image) setImage(meta.image)
     }
-    setFetching(false)
+    setLoadingMeta(false)
   }
 
   async function handleSave() {
     if (!url || !title) return
-    setLoading(true)
+    setSaving(true)
     const tagArray = tags.split(',').map(t => t.trim()).filter(Boolean)
-    const { data } = await supabase.from('bookmarks').insert({
+    const favicon = getFaviconUrl(url)
+    const { data, error } = await supabase.from('bookmarks').insert({
       space_id: spaceId,
       url, title, description,
-      image_url: image || null,
+      favicon_url: favicon,
       tags: tagArray,
-      is_favorite: false,
-      is_read_later: false,
+      is_favorite: isFavorite,
+      is_read_later: isReadLater,
     }).select().single()
+    setSaving(false)
     if (data) onAdded(data)
-    setLoading(false)
   }
 
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-bg-surface border border-border-default rounded-2xl w-full max-w-md p-5 animate-slide-up" onClick={e => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-4">
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={onClose}>
+      <div className="bg-bg-surface border border-border-default rounded-t-2xl sm:rounded-2xl w-full sm:max-w-md animate-slide-up" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 pt-5 pb-4 border-b border-border-subtle">
           <h3 className="font-serif text-base font-medium text-text-primary">agregar link</h3>
           <button onClick={onClose} className="text-text-muted hover:text-text-primary"><X size={16} /></button>
         </div>
-        <div className="space-y-3">
+
+        <div className="px-5 py-4 space-y-3">
           <div>
-            <label className="text-xs text-text-muted mb-1 block">URL</label>
-            <input value={url} onChange={e => setUrl(e.target.value)} onBlur={handleUrlBlur}
+            <label className="text-xs text-text-muted mb-1.5 block">URL</label>
+            <input
+              autoFocus
+              value={url}
+              onChange={e => setUrl(e.target.value)}
+              onBlur={handleUrlBlur}
               placeholder="https://..."
-              className="w-full bg-bg-elevated border border-border-subtle rounded-lg px-3 py-2 text-sm text-text-primary placeholder:text-text-muted outline-none focus:border-accent-border" />
+              className="w-full bg-bg-elevated border border-border-subtle rounded-xl px-3 py-2.5 text-sm text-text-primary placeholder:text-text-muted outline-none focus:border-accent-border"
+            />
           </div>
-          {fetching && <div className="flex items-center gap-2 text-xs text-text-muted"><Loader2 size={12} className="animate-spin" /> obteniendo info...</div>}
-          {image && <img src={image} alt="" className="w-full h-32 object-cover rounded-lg border border-border-subtle" />}
+
           <div>
-            <label className="text-xs text-text-muted mb-1 block">título</label>
+            <label className="text-xs text-text-muted mb-1.5 block flex items-center gap-2">
+              título
+              {loadingMeta && <Loader2 size={11} className="animate-spin" />}
+            </label>
             <input value={title} onChange={e => setTitle(e.target.value)}
-              placeholder="título del link"
-              className="w-full bg-bg-elevated border border-border-subtle rounded-lg px-3 py-2 text-sm text-text-primary placeholder:text-text-muted outline-none focus:border-accent-border" />
+              placeholder="se autocompleta con la URL"
+              className="w-full bg-bg-elevated border border-border-subtle rounded-xl px-3 py-2.5 text-sm text-text-primary placeholder:text-text-muted outline-none focus:border-accent-border" />
           </div>
+
           <div>
-            <label className="text-xs text-text-muted mb-1 block">descripción (opcional)</label>
+            <label className="text-xs text-text-muted mb-1.5 block">descripción</label>
             <textarea value={description} onChange={e => setDescription(e.target.value)} rows={2}
-              placeholder="breve descripción..."
-              className="w-full bg-bg-elevated border border-border-subtle rounded-lg px-3 py-2 text-sm text-text-primary placeholder:text-text-muted outline-none focus:border-accent-border" />
+              className="w-full bg-bg-elevated border border-border-subtle rounded-xl px-3 py-2.5 text-sm text-text-primary placeholder:text-text-muted outline-none focus:border-accent-border" />
           </div>
+
           <div>
-            <label className="text-xs text-text-muted mb-1 block">tags (separados por coma)</label>
+            <label className="text-xs text-text-muted mb-1.5 block">tags (separados por coma)</label>
             <input value={tags} onChange={e => setTags(e.target.value)}
-              placeholder="diseño, referencia, tool..."
-              className="w-full bg-bg-elevated border border-border-subtle rounded-lg px-3 py-2 text-sm text-text-primary placeholder:text-text-muted outline-none focus:border-accent-border" />
+              placeholder="diseño, referencia..."
+              className="w-full bg-bg-elevated border border-border-subtle rounded-xl px-3 py-2.5 text-sm text-text-primary placeholder:text-text-muted outline-none focus:border-accent-border" />
           </div>
-          <button onClick={handleSave} disabled={!url || !title || loading}
-            className="w-full py-2.5 bg-accent text-white rounded-lg text-sm font-medium hover:opacity-90 disabled:opacity-40 flex items-center justify-center gap-2">
-            {loading && <Loader2 size={14} className="animate-spin" />}
-            guardar link
+
+          <div className="flex gap-3">
+            <button onClick={() => setIsFavorite(!isFavorite)}
+              className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl border text-sm transition-all
+                ${isFavorite ? 'bg-amber-note-bg border-amber-note-border text-amber-note' : 'bg-bg-elevated border-border-subtle text-text-muted'}`}>
+              ★ favorito
+            </button>
+            <button onClick={() => setIsReadLater(!isReadLater)}
+              className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl border text-sm transition-all
+                ${isReadLater ? 'bg-accent-soft border-accent-border text-accent' : 'bg-bg-elevated border-border-subtle text-text-muted'}`}>
+              ⏱ ver después
+            </button>
+          </div>
+        </div>
+
+        <div className="px-5 pb-5">
+          <button onClick={handleSave} disabled={!title || !url || saving}
+            className="w-full py-3.5 bg-accent text-white rounded-xl font-medium text-sm hover:opacity-90 disabled:opacity-40 flex items-center justify-center gap-2">
+            {saving ? <Loader2 size={16} className="animate-spin" /> : null}
+            {saving ? 'guardando...' : 'guardar en nido'}
           </button>
         </div>
       </div>

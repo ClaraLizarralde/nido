@@ -14,9 +14,10 @@ import ReactMarkdown from 'react-markdown'
 interface NotesTabProps {
   spaceId: string | null
   allSpaces: Space[] | null
+  openAddOnMount?: boolean
 }
 
-export default function NotesTab({ spaceId, allSpaces }: NotesTabProps) {
+export default function NotesTab({ spaceId, allSpaces, openAddOnMount }: NotesTabProps) {
   const [notes, setNotes] = useState<Note[]>([])
   const [loading, setLoading] = useState(true)
   const [showAdd, setShowAdd] = useState(false)
@@ -29,12 +30,16 @@ export default function NotesTab({ spaceId, allSpaces }: NotesTabProps) {
   )
   const supabase = createClient()
 
-  useEffect(() => { loadNotes() }, [spaceId])
-  useEffect(() => { setOrderedNotes(notes) }, [notes])
+ useEffect(() => { loadNotes() }, [spaceId]) 
+useEffect(() => { setOrderedNotes(notes) }, [notes])
+
+useEffect(() => {
+  if (openAddOnMount && spaceId) setShowAdd(true)
+}, [openAddOnMount])
 
   async function loadNotes() {
     setLoading(true)
-    let query = supabase.from('notes').select('*').order('updated_at', { ascending: false })
+    let query = supabase.from('notes').select('*').order('order_index', { ascending: true, nullsFirst: false })
     if (spaceId) query = query.eq('space_id', spaceId)
     const { data } = await query
     setNotes(data || [])
@@ -66,13 +71,20 @@ export default function NotesTab({ spaceId, allSpaces }: NotesTabProps) {
     setNotes(prev => prev.filter(n => n.id !== id))
   }
 
-  function handleDragEnd(event: DragEndEvent) {
-    const { active, over } = event
-    if (!over || active.id === over.id) return
-    const oldIndex = orderedNotes.findIndex(n => n.id === active.id)
-    const newIndex = orderedNotes.findIndex(n => n.id === over.id)
-    setOrderedNotes(arrayMove(orderedNotes, oldIndex, newIndex))
-  }
+ async function handleDragEnd(event: DragEndEvent) {
+  const { active, over } = event
+  if (!over || active.id === over.id) return
+  const oldIndex = orderedNotes.findIndex(n => n.id === active.id)
+  const newIndex = orderedNotes.findIndex(n => n.id === over.id)
+  const reordered = arrayMove(orderedNotes, oldIndex, newIndex)
+  setOrderedNotes(reordered)
+
+  await Promise.all(
+    reordered.map((n, index) =>
+      supabase.from('notes').update({ order_index: index }).eq('id', n.id)
+    )
+  )
+}
 
   const displayNotes = orderedNotes.length > 0 ? orderedNotes : notes
   const otherSpaces = (allSpaces || []).filter(s => s.id !== spaceId)

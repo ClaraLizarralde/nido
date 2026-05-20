@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Plus, Search, Home, Trash2, Edit3, Check, X } from 'lucide-react'
 import type { Space } from '@/lib/types'
 
@@ -24,6 +24,16 @@ export default function Sidebar({ spaces, activeSpaceId, onSelectSpace, onAddSpa
   const [editName, setEditName] = useState('')
   const [editEmoji, setEditEmoji] = useState('')
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
+
+
+
+useEffect(() => {
+  function handleOpenAdd() {
+    setAdding(true)
+  }
+  window.addEventListener('nido:open-add-space', handleOpenAdd)
+  return () => window.removeEventListener('nido:open-add-space', handleOpenAdd)
+}, [])
 
   const filtered = spaces.filter(s => s.name.toLowerCase().includes(search.toLowerCase()))
 

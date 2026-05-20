@@ -15,7 +15,7 @@ interface ImportedBookmark {
 interface ImportModalProps {
   spaces: Space[]
   onClose: () => void
-  onImported: (count: number) => void
+  onImported: (count: number) => void  // ← recibe count
 }
 
 export default function ImportModal({ spaces, onClose, onImported }: ImportModalProps) {
@@ -81,7 +81,7 @@ export default function ImportModal({ spaces, onClose, onImported }: ImportModal
         setError('No se encontraron bookmarks en el archivo. Asegurate de exportar en formato HTML desde tu browser.')
         return
       }
-const uniqueFolders = Array.from(new Set(items.map(i => i.folder || 'Sin carpeta')))
+      const uniqueFolders = Array.from(new Set(items.map(i => i.folder || 'Sin carpeta')))
       setFolders(uniqueFolders)
       setFolderMap(Object.fromEntries(uniqueFolders.map(f => [f, true])))
       setParsed(items)
@@ -104,7 +104,6 @@ const uniqueFolders = Array.from(new Set(items.map(i => i.folder || 'Sin carpeta
     if (!selectedSpace || selectedItems.length === 0) return
     setImporting(true)
 
-    // batch insert in chunks of 50
     const CHUNK = 50
     let count = 0
     for (let i = 0; i < selectedItems.length; i += CHUNK) {
@@ -120,16 +119,32 @@ const uniqueFolders = Array.from(new Set(items.map(i => i.folder || 'Sin carpeta
         created_at: b.addDate ? new Date(b.addDate * 1000).toISOString() : new Date().toISOString(),
       }))
 
-      const { error: err } = await supabase
+      // BUG FIX: el schema no tiene unique constraint en (url, space_id)
+      // así que usamos insert con ignoreDuplicates como fallback
+      const { error: err, data } = await supabase
         .from('bookmarks')
-        .upsert(chunk, { onConflict: 'url,space_id', ignoreDuplicates: true } as any)
+        .insert(chunk)
+        .select()
 
-      if (!err) count += chunk.length
+      if (!err && data) {
+        count += data.length
+      } else if (err) {
+        // si falla por duplicado, intentar de a uno para rescatar los que no están duplicados
+        for (const row of chunk) {
+          const { error: singleErr, data: singleData } = await supabase
+            .from('bookmarks')
+            .insert(row)
+            .select()
+            .single()
+          if (!singleErr && singleData) count++
+        }
+      }
     }
 
     setImportedCount(count)
     setDone(true)
     setImporting(false)
+    // BUG FIX: llamamos onImported con el count para que page.tsx pueda recargar
     onImported(count)
   }
 
