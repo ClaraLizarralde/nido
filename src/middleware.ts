@@ -17,8 +17,8 @@ export async function middleware(request: NextRequest) {
         getAll() {
           return request.cookies.getAll()
         },
-setAll(cookiesToSet: { name: string; value: string; options?: any }[]) {
-              cookiesToSet.forEach(({ name, value }) =>
+        setAll(cookiesToSet: { name: string; value: string; options?: any }[]) {
+          cookiesToSet.forEach(({ name, value }) =>
             request.cookies.set(name, value)
           )
           response = NextResponse.next({ request })
@@ -32,11 +32,15 @@ setAll(cookiesToSet: { name: string; value: string; options?: any }[]) {
 
   const { data: { user } } = await supabase.auth.getUser()
 
-  if (!user && request.nextUrl.pathname !== '/login') {
+  const isLocalhost = request.nextUrl.hostname === 'localhost'
+  const isLoginPage = request.nextUrl.pathname === '/login'
+  const isAuthRoute = request.nextUrl.pathname.startsWith('/auth')
+
+  if (!user && !isLoginPage && !isAuthRoute && !isLocalhost) {
     return NextResponse.redirect(new URL('/login', request.url))
   }
 
-  if (user && request.nextUrl.pathname === '/login') {
+  if (user && isLoginPage) {
     return NextResponse.redirect(new URL('/', request.url))
   }
 

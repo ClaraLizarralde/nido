@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import { Plus, Star, Clock, Tag, X, ExternalLink, Loader2, Trash2, FolderInput } from 'lucide-react'
+import { Plus, Star, Clock, Tag, X, ExternalLink, Loader2, Trash2, FolderInput, LayoutGrid, List } from 'lucide-react'
 import type { Bookmark, Space } from '@/lib/types'
 import { createClient } from '@/lib/supabase'
 import { fetchUrlMetadata, getDomain, getFaviconUrl, formatRelativeTime } from '@/lib/utils'
@@ -17,6 +17,7 @@ export default function BookmarksTab({ spaceId, allSpaces }: BookmarksTabProps) 
   const [showAdd, setShowAdd] = useState(false)
   const [filter, setFilter] = useState<'all' | 'favorites' | 'read-later'>('all')
   const [searchTag, setSearchTag] = useState('')
+  const [viewMode, setViewMode] = useState<'card' | 'list'>('card') // ← nuevo
   const supabase = createClient()
 
   useEffect(() => { loadBookmarks() }, [spaceId])
@@ -82,9 +83,24 @@ export default function BookmarksTab({ spaceId, allSpaces }: BookmarksTabProps) 
             </button>
           ))}
         </div>
+
+        {/* toggle de vista */}
+        <div className="flex gap-0.5 ml-auto bg-bg-elevated rounded-lg p-0.5">
+          <button onClick={() => setViewMode('card')}
+            className={`p-1.5 rounded-md transition-all ${viewMode === 'card' ? 'bg-bg-surface text-text-primary' : 'text-text-muted hover:text-text-secondary'}`}
+            title="vista cards">
+            <LayoutGrid size={13} />
+          </button>
+          <button onClick={() => setViewMode('list')}
+            className={`p-1.5 rounded-md transition-all ${viewMode === 'list' ? 'bg-bg-surface text-text-primary' : 'text-text-muted hover:text-text-secondary'}`}
+            title="vista lista">
+            <List size={13} />
+          </button>
+        </div>
+
         {spaceId && (
           <button onClick={() => setShowAdd(true)}
-            className="ml-auto flex items-center gap-1.5 text-xs px-3 py-1.5 bg-accent text-white rounded-lg hover:opacity-90 font-medium">
+            className="flex items-center gap-1.5 text-xs px-3 py-1.5 bg-accent text-white rounded-lg hover:opacity-90 font-medium">
             <Plus size={13} /> agregar link
           </button>
         )}
@@ -95,10 +111,24 @@ export default function BookmarksTab({ spaceId, allSpaces }: BookmarksTabProps) 
           <div className="flex justify-center py-16"><Loader2 size={20} className="text-text-muted animate-spin" /></div>
         ) : filtered.length === 0 ? (
           <EmptyState onAdd={spaceId ? () => setShowAdd(true) : null} />
-        ) : (
+        ) : viewMode === 'card' ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {filtered.map(b => (
               <BookmarkCard
+                key={b.id}
+                bookmark={b}
+                otherSpaces={otherSpaces}
+                onFavorite={() => toggleFavorite(b.id, b.is_favorite)}
+                onReadLater={() => toggleReadLater(b.id, b.is_read_later)}
+                onDelete={() => deleteBookmark(b.id)}
+                onMove={(targetId) => moveBookmark(b.id, targetId)}
+              />
+            ))}
+          </div>
+        ) : (
+          <div className="flex flex-col divide-y divide-border-subtle">
+            {filtered.map(b => (
+              <BookmarkRow
                 key={b.id}
                 bookmark={b}
                 otherSpaces={otherSpaces}
@@ -123,6 +153,109 @@ export default function BookmarksTab({ spaceId, allSpaces }: BookmarksTabProps) 
   )
 }
 
+// ─── Modo lista ──────────────────────────────────────────────────────────────
+
+function BookmarkRow({ bookmark: b, otherSpaces, onFavorite, onReadLater, onDelete, onMove }: {
+  bookmark: Bookmark
+  otherSpaces: Space[]
+  onFavorite: () => void
+  onReadLater: () => void
+  onDelete: () => void
+  onMove: (targetSpaceId: string) => void
+}) {
+  const [hovered, setHovered] = useState(false)
+  const [showMove, setShowMove] = useState(false)
+  const moveRef = useRef<HTMLDivElement>(null)
+  const favicon = getFaviconUrl(b.url)
+
+  useEffect(() => {
+    if (!showMove) return
+    function handleClick(e: MouseEvent) {
+      if (moveRef.current && !moveRef.current.contains(e.target as Node)) {
+        setShowMove(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [showMove])
+
+  return (
+    <div
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => { setHovered(false); setShowMove(false) }}
+      className={`group flex items-center gap-3 py-2.5 px-1 transition-colors
+        ${b.is_favorite ? 'bg-amber-note-border/10' : 'hover:bg-bg-elevated/50'}`}
+    >
+      {/* favicon */}
+      <div className="w-7 h-7 rounded-md bg-bg-elevated flex items-center justify-center flex-shrink-0 overflow-hidden">
+        {favicon
+          ? <img src={favicon} alt="" className="w-4 h-4" />
+          : <span className="text-[10px] text-text-muted">{getDomain(b.url).charAt(0).toUpperCase()}</span>
+        }
+      </div>
+
+      {/* título + meta */}
+      <div className="flex-1 min-w-0">
+        <a href={b.url} target="_blank" rel="noopener noreferrer"
+          className="text-sm text-text-primary hover:text-accent font-medium truncate block leading-snug">
+          {b.title}
+        </a>
+        <div className="flex items-center gap-2 mt-0.5">
+          <span className="text-[10px] text-text-muted truncate">{getDomain(b.url)}</span>
+          {b.tags.slice(0, 3).map(tag => (
+            <span key={tag} className="text-[10px] px-1.5 py-0.5 bg-bg-elevated text-text-muted rounded hidden sm:inline">{tag}</span>
+          ))}
+          {b.is_read_later && (
+            <span className="text-[9px] px-1.5 py-0.5 border border-border-subtle text-text-muted rounded">ver después</span>
+          )}
+        </div>
+      </div>
+
+      {/* fecha */}
+      <span className="text-[10px] text-text-muted flex-shrink-0 hidden sm:block">{formatRelativeTime(b.created_at)}</span>
+
+      {/* acciones */}
+      <div className={`flex gap-1 flex-shrink-0 transition-opacity ${hovered ? 'opacity-100' : 'opacity-0'}`}>
+        <ActionBtn onClick={onFavorite} active={b.is_favorite} title="favorito">
+          <Star size={11} fill={b.is_favorite ? 'currentColor' : 'none'} />
+        </ActionBtn>
+        <ActionBtn onClick={onReadLater} active={b.is_read_later} title="ver después">
+          <Clock size={11} />
+        </ActionBtn>
+        <a href={b.url} target="_blank" rel="noopener noreferrer"
+          className="p-1.5 rounded-md bg-bg-base/80 backdrop-blur text-text-muted hover:text-text-primary border border-border-subtle">
+          <ExternalLink size={11} />
+        </a>
+        {otherSpaces.length > 0 && (
+          <div className="relative" ref={moveRef}>
+            <ActionBtn onClick={() => setShowMove(v => !v)} title="mover a...">
+              <FolderInput size={11} />
+            </ActionBtn>
+            {showMove && (
+              <div className="absolute top-7 right-0 z-20 bg-bg-surface border border-border-default rounded-xl shadow-lg py-1.5 w-44">
+                <div className="text-[10px] text-text-muted px-3 py-1 border-b border-border-subtle mb-1">mover a...</div>
+                {otherSpaces.map(space => (
+                  <button key={space.id}
+                    onClick={() => { onMove(space.id); setShowMove(false) }}
+                    className="w-full text-left flex items-center gap-2 px-3 py-1.5 text-xs text-text-secondary hover:bg-bg-elevated transition-colors">
+                    <span>{space.emoji}</span>
+                    <span>{space.name}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+        <ActionBtn onClick={onDelete} title="eliminar" danger>
+          <Trash2 size={11} />
+        </ActionBtn>
+      </div>
+    </div>
+  )
+}
+
+// ─── Modo card (sin cambios) ──────────────────────────────────────────────────
+
 function BookmarkCard({ bookmark: b, otherSpaces, onFavorite, onReadLater, onDelete, onMove }: {
   bookmark: Bookmark
   otherSpaces: Space[]
@@ -136,7 +269,6 @@ function BookmarkCard({ bookmark: b, otherSpaces, onFavorite, onReadLater, onDel
   const moveRef = useRef<HTMLDivElement>(null)
   const favicon = getFaviconUrl(b.url)
 
-  // Cerrar el menú si se hace click afuera
   useEffect(() => {
     if (!showMove) return
     function handleClick(e: MouseEvent) {
